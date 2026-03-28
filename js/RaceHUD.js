@@ -148,7 +148,7 @@ export class RaceHUD {
 
     // ─── Results ──────────────────────────────────────────
 
-    showResults( playerStates ) {
+    showResults( playerStates, isHost, onPlayAgain, onReturnToLobby ) {
 
         const entries = [];
 
@@ -184,13 +184,33 @@ export class RaceHUD {
 
         } ).join( '' );
 
+        const hostBtn = isHost
+            ? `<button id="hud-btn-play-again" class="hud-results-btn hud-results-btn-primary">Play Again</button>`
+            : `<p class="hud-results-waiting">Waiting for host...</p>`;
+
         this.resultsEl.innerHTML = `
             <div class="hud-results-panel">
                 <h2>Results</h2>
                 ${ rows }
+                <div class="hud-results-actions">
+                    ${ hostBtn }
+                    <button id="hud-btn-return-lobby" class="hud-results-btn">Return to Lobby</button>
+                </div>
             </div>
         `;
         this.resultsEl.style.display = 'flex';
+
+        if ( isHost && onPlayAgain ) {
+
+            document.getElementById( 'hud-btn-play-again' ).addEventListener( 'click', onPlayAgain );
+
+        }
+
+        if ( onReturnToLobby ) {
+
+            document.getElementById( 'hud-btn-return-lobby' ).addEventListener( 'click', onReturnToLobby );
+
+        }
 
     }
 

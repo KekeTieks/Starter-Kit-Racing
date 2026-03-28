@@ -136,6 +136,44 @@ export class RaceRoom extends Room {
 
         } );
 
+        this.onMessage( 'restartRace', ( client ) => {
+
+            if ( client.sessionId !== this.hostSessionId ) return;
+            if ( this.state.phase !== 'finished' ) return;
+
+            // Clear any pending finish timeout
+            if ( this.finishTimeout ) {
+
+                this.finishTimeout.clear();
+                this.finishTimeout = null;
+
+            }
+
+            // Reset race fields
+            this.state.phase = 'waiting';
+            this.state.mode = 'sandbox';
+            this.state.finishCount = 0;
+            this.state.countdown = 0;
+            this.state.raceTimer = 0;
+            this.countdownRemaining = 0;
+
+            // Reset all player race fields
+            for ( const [ , player ] of this.state.players ) {
+
+                player.currentLap = 0;
+                player.lapTime = 0;
+                player.totalTime = 0;
+                player.finishPosition = 0;
+                player.finished = false;
+                player.raceProgress = 0;
+
+            }
+
+            // Unlock so new players can join
+            this.unlock();
+
+        } );
+
         // Fixed-rate simulation
         this.setSimulationInterval( ( deltaMs ) => this.tick( deltaMs ), 1000 / TICK_RATE );
 

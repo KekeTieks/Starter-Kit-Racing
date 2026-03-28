@@ -7,6 +7,7 @@ export class Network {
         this.client = null;
         this.room = null;
         this.sessionId = null;
+        this._joinedExistingRoom = false;
 
         // Server target state per player (latest from server)
         this.playerStates = new Map();
@@ -42,10 +43,12 @@ export class Network {
         if ( roomId ) {
 
             this.room = await this.client.joinById( roomId, options );
+            this._joinedExistingRoom = true;
 
         } else {
 
             this.room = await this.client.joinOrCreate( 'race', options );
+            this._joinedExistingRoom = false;
 
         }
 
@@ -130,6 +133,7 @@ export class Network {
                     lapTime: player.lapTime,
                     finished: player.finished,
                     finishPosition: player.finishPosition,
+                    raceProgress: player.raceProgress,
                 };
                 this.playerStates.set( sessionId, s );
 
@@ -156,6 +160,7 @@ export class Network {
                 s.lapTime = player.lapTime;
                 s.finished = player.finished;
                 s.finishPosition = player.finishPosition;
+                s.raceProgress = player.raceProgress;
 
             }
 
@@ -230,6 +235,16 @@ export class Network {
         if ( this.room ) {
 
             this.room.send( 'startRace', { mode, laps } );
+
+        }
+
+    }
+
+    sendRestartRace() {
+
+        if ( this.room ) {
+
+            this.room.send( 'restartRace' );
 
         }
 

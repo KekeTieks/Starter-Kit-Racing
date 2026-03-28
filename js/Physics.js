@@ -120,6 +120,20 @@ export function buildWallColliders( world, debugGroup, customCells ) {
 
 }
 
+export function createKinematicSphereBody( world, spawnPos ) {
+
+	return rigidBody.create( world, {
+		shape: sphere.create( { radius: 0.5 } ),
+		motionType: MotionType.KINEMATIC,
+		objectLayer: world._OL_MOVING,
+		position: spawnPos || [ 3.5, 0.5, 5 ],
+		mass: 1000.0,
+		friction: 0.0,
+		restitution: 0.3,
+	} );
+
+}
+
 export function createSphereBody( world, spawnPos ) {
 
 	const body = rigidBody.create( world, {

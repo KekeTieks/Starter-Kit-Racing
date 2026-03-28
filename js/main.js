@@ -7,7 +7,7 @@ import { RemoteVehicle } from './RemoteVehicle.js';
 import { Camera } from './Camera.js';
 import { Controls } from './Controls.js';
 import { buildTrack, decodeCells, computeSpawnPosition, computeTrackBounds } from './Track.js';
-import { buildWallColliders, createSphereBody } from './Physics.js';
+import { buildWallColliders, createSphereBody, createKinematicSphereBody } from './Physics.js';
 import { SmokeTrails } from './Particles.js';
 import { GameAudio } from './Audio.js';
 import { Network } from './Network.js';
@@ -253,6 +253,7 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 
 	const vehicle = new Vehicle();
 	const remoteVehicles = new Map();
+	const remoteProxyBodies = new Map(); // sessionId → kinematic body in localWorld
 
 	const cam = new Camera();
 	const controls = new Controls();
@@ -371,6 +372,12 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 			scene.add( group );
 			remoteVehicles.set( sessionId, remote );
 
+			// Add a kinematic proxy body so the local player physically collides with remote players
+			const state = network.getPlayerState( sessionId );
+			const spawnPos = state ? [ state.sx, state.sy, state.sz ] : null;
+			const proxyBody = createKinematicSphereBody( localWorld, spawnPos );
+			remoteProxyBodies.set( sessionId, proxyBody );
+
 		}
 
 	}
@@ -398,9 +405,42 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 
 		}
 
+		remoteProxyBodies.delete( sessionId );
+
 		updateLobbyPlayers( network, lobby );
 
 	};
+
+	// Whether the local player is host (created the room, not a joiner)
+	const isHost = ! network._joinedExistingRoom;
+
+	function handleReturnToLobby() {
+
+		cleanupMultiplayer();
+		hud.hideAll();
+		lobby.show();
+		lobby.showRoom( network.roomId, isHost );
+		updateLobbyPlayers( network, lobby );
+
+		lobby.onStartRace = ( { mode, laps } ) => {
+
+			network.sendStartRace( mode, laps );
+
+		};
+
+		// Re-arm phase listener so the next race start re-launches initMultiplayer
+		network.onPhaseChange = ( phase, countdown ) => {
+
+			if ( phase === 'countdown' || phase === 'racing' ) {
+
+				lobby.hide();
+				initMultiplayer( network, lobby, customCells, phase, countdown );
+
+			}
+
+		};
+
+	}
 
 	// Race phase changes
 	network.onPhaseChange = ( phase, countdown ) => {
@@ -417,7 +457,17 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 
 		} else if ( phase === 'finished' ) {
 
-			hud.showResults( network.playerStates );
+			hud.showResults(
+				network.playerStates,
+				isHost,
+				() => network.sendRestartRace(),   // Play Again (host only)
+				handleReturnToLobby,               // Return to Lobby (all)
+			);
+
+		} else if ( phase === 'waiting' ) {
+
+			// Host sent restartRace — go back to lobby for all players
+			handleReturnToLobby();
 
 		}
 
@@ -427,7 +477,7 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 
 		running = false;
 
-		// Dispose all remote vehicles
+		// Dispose all remote vehicles and their proxy bodies
 		for ( const remote of remoteVehicles.values() ) {
 
 			remote.dispose( scene );
@@ -435,6 +485,7 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 		}
 
 		remoteVehicles.clear();
+		remoteProxyBodies.clear();
 
 		// Dispose particles
 		particles.dispose( scene );
@@ -521,11 +572,19 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 
 		}
 
-		// Remote players: lerp toward server
+		// Remote players: lerp toward server + update proxy collision bodies
 		for ( const [ sessionId, remote ] of remoteVehicles ) {
 
 			const state = network.getPlayerState( sessionId );
 			remote.updateFromServer( dt, state );
+
+			// Move kinematic proxy body to match server position for local collision detection
+			const proxyBody = remoteProxyBodies.get( sessionId );
+			if ( proxyBody && state ) {
+
+				rigidBody.setPosition( localWorld, proxyBody, [ state.sx, state.sy, state.sz ], true );
+
+			}
 
 		}
 

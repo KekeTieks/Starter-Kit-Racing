@@ -1,9 +1,9 @@
 import { Room } from 'colyseus';
 import { updateWorld, rigidBody } from 'crashcat';
 import { RaceState, PlayerState } from '../schema/RaceState.js';
-import { initPhysics, createSphereBody } from '../simulation/PhysicsWorld.js';
+import { initPhysics, createSphereBody, createChassisBody, initRayFilter } from '../simulation/PhysicsWorld.js';
 import { VehicleSim } from '../simulation/VehicleSim.js';
-import { VEHICLE_STATS } from '../simulation/VehicleStats.js';
+import { VEHICLE_STATS, USE_ARCADE_VEHICLE } from '../simulation/VehicleStats.js';
 import {
     DEFAULT_CELLS, decodeCells,
     computeSpawnPositions, computeSpawnPosition,
@@ -47,6 +47,7 @@ export class RaceRoom extends Room {
 
         this.trackCells = mapData ? decodeCells( mapData ) : DEFAULT_CELLS;
         this.world = initPhysics( this.trackCells );
+        this._rayFilter = USE_ARCADE_VEHICLE ? initRayFilter( this.world ) : null;
         this.sims = new Map();
         this.colorIndex = 0;
         this.hostSessionId = null;
@@ -60,7 +61,7 @@ export class RaceRoom extends Room {
         this.finishTimeout = null;
         this.inputCounts = new Map(); // sessionId → { count, windowStart }
 
-        // Contact listener for impact sounds
+        // Contact listener for impact sounds + speed penalty
         this.contactListener = {
             onContactAdded: ( bodyA, bodyB ) => {
 
@@ -68,13 +69,22 @@ export class RaceRoom extends Room {
 
                     if ( bodyA === sim.body || bodyB === sim.body ) {
 
-                        const speed = Math.sqrt(
-                            sim.modelVelX * sim.modelVelX + sim.modelVelZ * sim.modelVelZ
-                        );
+                        const vel = sim.body.motionProperties.linearVelocity;
+                        const speed = Math.sqrt( vel[ 0 ] * vel[ 0 ] + vel[ 2 ] * vel[ 2 ] );
 
                         if ( speed > 2 ) {
 
                             this.broadcast( 'impact', { sessionId, velocity: speed } );
+
+                        }
+
+                        // Server-authoritative speed penalty: reduce rigid body velocity
+                        if ( speed > 1 ) {
+
+                            const keep = Math.max( 0.4, 1 - speed * 0.08 );
+                            rigidBody.setLinearVelocity( this.world, sim.body, [
+                                vel[ 0 ] * keep, vel[ 1 ], vel[ 2 ] * keep
+                            ] );
 
                         }
 
@@ -157,6 +167,7 @@ export class RaceRoom extends Room {
             this.state.mapData = data;
             this.trackCells = data ? decodeCells( data ) : DEFAULT_CELLS;
             this.world = initPhysics( this.trackCells );
+            this._rayFilter = USE_ARCADE_VEHICLE ? initRayFilter( this.world ) : null;
             this.finishLine = computeFinishLine( this.trackCells );
             this.checkpoints = computeCheckpoints( this.trackCells );
 
@@ -166,7 +177,11 @@ export class RaceRoom extends Room {
             for ( const [ sessionId, sim ] of this.sims ) {
 
                 const spawn = spawnPoints[ i++ ];
-                sim.body = createSphereBody( this.world, spawn.position );
+                const simStats = VEHICLE_STATS[ this.state.players.get( sessionId )?.vehicle || 'yellow' ];
+                sim.body = USE_ARCADE_VEHICLE
+                    ? createChassisBody( this.world, spawn.position, simStats )
+                    : createSphereBody( this.world, spawn.position );
+                if ( this._rayFilter ) sim._rayFilter = this._rayFilter;
                 sim.spawnPos = [ ...spawn.position ];
                 sim.spawnAngle = spawn.angle;
                 sim.spherePos[ 0 ] = spawn.position[ 0 ];
@@ -271,7 +286,10 @@ export class RaceRoom extends Room {
         const spawn = spawnPoints[ spawnPoints.length - 1 ];
 
         const sim = new VehicleSim( this.world, spawn.position, spawn.angle, stats );
-        sim.body = createSphereBody( this.world, spawn.position );
+        sim.body = USE_ARCADE_VEHICLE
+            ? createChassisBody( this.world, spawn.position, stats )
+            : createSphereBody( this.world, spawn.position );
+        if ( this._rayFilter ) sim._rayFilter = this._rayFilter;
         sim.spawnPos = [ ...spawn.position ];
         sim.spawnAngle = spawn.angle;
         this.sims.set( client.sessionId, sim );
@@ -349,6 +367,12 @@ export class RaceRoom extends Room {
             rigidBody.setLinearVelocity( this.world, sim.body, [ 0, 0, 0 ] );
             rigidBody.setAngularVelocity( this.world, sim.body, [ 0, 0, 0 ] );
 
+            // Reset quaternion to spawn angle
+            const sa = spawn.angle || 0;
+            const spawnQuat = [ 0, Math.sin( sa / 2 ), 0, Math.cos( sa / 2 ) ];
+            rigidBody.setQuaternion( this.world, sim.body, spawnQuat, false );
+            sim.quat = [ ...spawnQuat ];
+
             sim.spherePos[ 0 ] = spawn.position[ 0 ];
             sim.spherePos[ 1 ] = spawn.position[ 1 ];
             sim.spherePos[ 2 ] = spawn.position[ 2 ];
@@ -357,6 +381,8 @@ export class RaceRoom extends Room {
             sim.acceleration = 0;
             sim.spawnPos = [ ...spawn.position ];
             sim.spawnAngle = spawn.angle;
+
+            if ( sim._arcadeVehicle ) sim._arcadeVehicle.reset();
 
             // Compute initial signed distance to finish line
             let prevDist = 0;

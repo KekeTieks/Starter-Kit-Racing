@@ -2,9 +2,12 @@ import {
     createWorldSettings, createWorld,
     addBroadphaseLayer, addObjectLayer, enableCollision,
     registerAll, rigidBody, box, sphere,
-    MotionType, MotionQuality
+    MotionType, MotionQuality,
+    castRay, createClosestCastRayCollector, createDefaultCastRaySettings,
+    CastRayStatus, filter
 } from 'crashcat';
 import { ORIENT_DEG, CELL_RAW, GRID_SCALE } from './TrackData.js';
+import { CHASSIS_HALF_EXTENTS } from './VehicleStats.js';
 
 export function initPhysics( cells ) {
 
@@ -64,6 +67,63 @@ export function createSphereBody( world, spawnPos ) {
 
 }
 
+// ── Arcade vehicle chassis (box body) ────────────────────────────
+
+export function createChassisBody( world, spawnPos, config ) {
+
+    return rigidBody.create( world, {
+        shape: box.create( { halfExtents: CHASSIS_HALF_EXTENTS } ),
+        motionType: MotionType.DYNAMIC,
+        objectLayer: world._OL_MOVING,
+        position: spawnPos || [ 3.5, 0.5, 5 ],
+        mass: config.mass,
+        friction: 0.3,
+        restitution: 0.3,
+        linearDamping: 0.05,
+        angularDamping: 0.5,
+        gravityFactor: 2.0,
+        motionQuality: MotionQuality.LINEAR_CAST,
+    } );
+
+}
+
+// ── Wheel raycast helper ─────────────────────────────────────────
+
+const _wheelRayCollector = createClosestCastRayCollector();
+const _wheelRaySettings = createDefaultCastRaySettings();
+
+export function initRayFilter( world ) {
+
+    const f = filter.create( world.settings.layers );
+    filter.disableObjectLayer( f, world.settings.layers, world._OL_MOVING );
+    return f;
+
+}
+
+const _wheelRayResult = { hit: false, fraction: 1.0 };
+const _wheelRayDown = [ 0, -1, 0 ];
+
+export function castWheelRay( world, origin, length, rayFilter ) {
+
+    _wheelRayCollector.reset();
+    castRay( world, _wheelRayCollector, _wheelRaySettings, origin, _wheelRayDown, length, rayFilter );
+
+    if ( _wheelRayCollector.hit.status === CastRayStatus.COLLIDING ) {
+
+        _wheelRayResult.hit = true;
+        _wheelRayResult.fraction = _wheelRayCollector.hit.fraction;
+
+    } else {
+
+        _wheelRayResult.hit = false;
+        _wheelRayResult.fraction = 1.0;
+
+    }
+
+    return _wheelRayResult;
+
+}
+
 function buildWallColliders( world, cells ) {
 
     const S = GRID_SCALE;
@@ -108,7 +168,7 @@ function buildWallColliders( world, cells ) {
                 position,
                 quaternion,
                 friction: 0.0,
-                restitution: 0.1,
+                restitution: 0.4,
             } );
 
         }

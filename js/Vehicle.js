@@ -1,5 +1,8 @@
 import * as THREE from 'three';
 import { rigidBody } from 'crashcat';
+import { ArcadeVehicle } from './ArcadeVehicle.js';
+import { USE_ARCADE_VEHICLE } from './VehicleStats.js';
+import { castWheelRay } from './Physics.js';
 
 const _tmpVec = new THREE.Vector3();
 const _forward = new THREE.Vector3();
@@ -55,11 +58,50 @@ export class Vehicle {
 
 		this.driftIntensity = 0;
 
+		// Post-collision reconciliation cooldown (frames to skip soft correction after a contact)
+		this._postContactFrames = 0;
+
+		// Arcade vehicle physics
+		this._useArcade = USE_ARCADE_VEHICLE;
+		this._arcadeVehicle = null;
+		this._rayFilter = null;
+		this._wheelData = null;
+
+		// Pre-allocated per-frame buffers
+		this._chassisState = {
+			position: [ 0, 0, 0 ],
+			quaternion: [ 0, 0, 0, 1 ],
+			linearVelocity: [ 0, 0, 0 ],
+			angularVelocity: [ 0, 0, 0 ],
+		};
+		this._rayResults = [
+			{ hit: false, fraction: 1.0 },
+			{ hit: false, fraction: 1.0 },
+			{ hit: false, fraction: 1.0 },
+			{ hit: false, fraction: 1.0 },
+		];
+		this._rayOrigin = [ 0, 0, 0 ];
+
+		if ( this._useArcade ) {
+
+			this._arcadeVehicle = new ArcadeVehicle( this._stats );
+
+		}
+
 	}
 
 	init( model, stats ) {
 
-		if ( stats ) this._stats = stats;
+		if ( stats ) {
+
+			this._stats = stats;
+			if ( this._useArcade ) {
+
+				this._arcadeVehicle = new ArcadeVehicle( this._stats );
+
+			}
+
+		}
 
 		const vehicleModel = model.clone();
 
@@ -101,6 +143,234 @@ export class Vehicle {
 	}
 
 	update( dt, controlsInput ) {
+
+		if ( this._useArcade ) {
+
+			this._updateArcade( dt, controlsInput );
+
+		} else {
+
+			this._updateLegacy( dt, controlsInput );
+
+		}
+
+	}
+
+	// ── New arcade vehicle update ────────────────────────────────
+
+	_updateArcade( dt, controlsInput ) {
+
+		this.inputX = controlsInput.x;
+		this.inputZ = controlsInput.z;
+
+		// Process input into steer / throttle / brake
+		let steer = 0, throttle = 0, brake = 0;
+
+		if ( controlsInput.touchActive && ( this.inputX !== 0 || this.inputZ !== 0 ) ) {
+
+			// Touch: joystick defines world-space direction, auto-gas
+			// Use chassis quaternion from physics body (not container)
+			const pos = this.rigidBody ? this.rigidBody.position : null;
+			const q = this.rigidBody ? this.rigidBody.quaternion : null;
+			if ( q ) {
+
+				_forward.set( 0, 0, 1 );
+				_quat.set( q[ 0 ], q[ 1 ], q[ 2 ], q[ 3 ] );
+				_forward.applyQuaternion( _quat );
+				const cross = _forward.x * this.inputZ - _forward.z * this.inputX;
+				steer = - cross * 2;
+
+			}
+
+			throttle = 1.0;
+
+		} else {
+
+			steer = this.inputX;
+			throttle = Math.max( 0, this.inputZ );
+			brake = Math.max( 0, - this.inputZ );
+
+		}
+
+		if ( ! this.rigidBody || ! this.physicsWorld ) return;
+
+		// Read chassis state into pre-allocated object
+		const pos = this.rigidBody.position;
+		const quat = this.rigidBody.quaternion;
+		const linVel = this.rigidBody.motionProperties.linearVelocity;
+		const angVel = this.rigidBody.motionProperties.angularVelocity;
+
+		const cs = this._chassisState;
+		cs.position[ 0 ] = pos[ 0 ]; cs.position[ 1 ] = pos[ 1 ]; cs.position[ 2 ] = pos[ 2 ];
+		cs.quaternion[ 0 ] = quat[ 0 ]; cs.quaternion[ 1 ] = quat[ 1 ]; cs.quaternion[ 2 ] = quat[ 2 ]; cs.quaternion[ 3 ] = quat[ 3 ];
+		cs.linearVelocity[ 0 ] = linVel[ 0 ]; cs.linearVelocity[ 1 ] = linVel[ 1 ]; cs.linearVelocity[ 2 ] = linVel[ 2 ];
+		cs.angularVelocity[ 0 ] = angVel[ 0 ]; cs.angularVelocity[ 1 ] = angVel[ 1 ]; cs.angularVelocity[ 2 ] = angVel[ 2 ];
+
+		// Perform 4 wheel raycasts (pre-allocated buffers)
+		const cfg = this._stats;
+		const rayLength = cfg.suspensionRestLength + cfg.wheelRadius + 0.25;
+		const offsets = this._arcadeVehicle.wheelOffsets;
+		const origin = this._rayOrigin;
+
+		_quat.set( quat[ 0 ], quat[ 1 ], quat[ 2 ], quat[ 3 ] );
+
+		for ( let i = 0; i < 4; i ++ ) {
+
+			_tmpVec.set( offsets[ i ][ 0 ], offsets[ i ][ 1 ], offsets[ i ][ 2 ] );
+			_tmpVec.applyQuaternion( _quat );
+			origin[ 0 ] = pos[ 0 ] + _tmpVec.x;
+			origin[ 1 ] = pos[ 1 ] + _tmpVec.y;
+			origin[ 2 ] = pos[ 2 ] + _tmpVec.z;
+
+			if ( this._rayFilter ) {
+
+				const hit = castWheelRay( this.physicsWorld, origin, rayLength, this._rayFilter );
+				this._rayResults[ i ].hit = hit.hit;
+				this._rayResults[ i ].fraction = hit.fraction;
+
+			} else {
+
+				this._rayResults[ i ].hit = false;
+				this._rayResults[ i ].fraction = 1.0;
+
+			}
+
+		}
+
+		// Run arcade vehicle physics
+		const result = this._arcadeVehicle.update( dt, cs, { steer, throttle, brake }, this._rayResults );
+
+		// Apply forces to chassis body
+		for ( let i = 0; i < result.forceCount; i ++ ) {
+
+			const f = result.forces[ i ];
+			rigidBody.addForceAtPosition( this.physicsWorld, this.rigidBody, f.force, f.position, true );
+
+		}
+
+		for ( let i = 0; i < result.torqueCount; i ++ ) {
+
+			rigidBody.addTorque( this.physicsWorld, this.rigidBody, result.torques[ i ], true );
+
+		}
+
+		// Update state for visuals and compatibility
+		this.linearSpeed = result.linearSpeed;
+		this.driftIntensity = result.driftIntensity;
+		this._wheelData = result.wheelData;
+
+		this.spherePos.set( pos[ 0 ], pos[ 1 ], pos[ 2 ] );
+		this.sphereVel.set( linVel[ 0 ], linVel[ 1 ], linVel[ 2 ] );
+
+		this.acceleration = THREE.MathUtils.lerp(
+			this.acceleration,
+			this.linearSpeed + ( 0.25 * this.linearSpeed * Math.abs( this.linearSpeed ) ),
+			dt
+		);
+
+		// Fall reset
+		if ( pos[ 1 ] < - 10 ) {
+
+			rigidBody.setPosition( this.physicsWorld, this.rigidBody, [ 3.5, 0.5, 5 ], false );
+			rigidBody.setLinearVelocity( this.physicsWorld, this.rigidBody, [ 0, 0, 0 ] );
+			rigidBody.setAngularVelocity( this.physicsWorld, this.rigidBody, [ 0, 0, 0 ] );
+			rigidBody.setQuaternion( this.physicsWorld, this.rigidBody, [ 0, 0, 0, 1 ], false );
+			this.spherePos.set( 3.5, 0.5, 5 );
+			this.sphereVel.set( 0, 0, 0 );
+			this.linearSpeed = 0;
+			this.angularSpeed = 0;
+			this.acceleration = 0;
+			this._arcadeVehicle.reset();
+
+		}
+
+		// Position container from chassis
+		this.container.position.set( pos[ 0 ], pos[ 1 ], pos[ 2 ] );
+		this.container.quaternion.set( quat[ 0 ], quat[ 1 ], quat[ 2 ], quat[ 3 ] );
+
+		if ( dt > 0 ) {
+
+			this.modelVelocity.subVectors( this.container.position, this.prevModelPos ).divideScalar( dt );
+			this.prevModelPos.copy( this.container.position );
+
+		}
+
+		this._updateBodyArcade( dt );
+		this._updateWheelsArcade( dt );
+
+	}
+
+	_updateBodyArcade( dt ) {
+
+		if ( ! this.bodyNode || ! this._wheelData ) return;
+
+		// Pitch from front-vs-rear suspension difference
+		const wd = this._wheelData;
+		const frontAvg = ( wd[ 0 ].compression + wd[ 1 ].compression ) / 2;
+		const rearAvg = ( wd[ 2 ].compression + wd[ 3 ].compression ) / 2;
+		const targetPitch = ( frontAvg - rearAvg ) * 2;
+
+		// Roll from left-vs-right suspension difference
+		const leftAvg = ( wd[ 0 ].compression + wd[ 2 ].compression ) / 2;
+		const rightAvg = ( wd[ 1 ].compression + wd[ 3 ].compression ) / 2;
+		const targetRoll = ( leftAvg - rightAvg ) * 2;
+
+		this.bodyNode.rotation.x = lerpAngle( this.bodyNode.rotation.x, targetPitch, dt * 8 );
+		this.bodyNode.rotation.z = lerpAngle( this.bodyNode.rotation.z, targetRoll, dt * 8 );
+		this.bodyNode.position.y = THREE.MathUtils.lerp( this.bodyNode.position.y, 0.2, dt * 5 );
+
+	}
+
+	_updateWheelsArcade( dt ) {
+
+		if ( ! this._wheelData ) return;
+
+		const wd = this._wheelData;
+
+		// Spin all wheels based on ground speed
+		for ( let i = 0; i < this.wheels.length; i ++ ) {
+
+			const wheel = this.wheels[ i ];
+			if ( ! wheel ) continue;
+
+			// Map to wheelData index
+			let wIdx = - 1;
+			if ( wheel === this.wheelFL ) wIdx = 0;
+			else if ( wheel === this.wheelFR ) wIdx = 1;
+			else if ( wheel === this.wheelBL ) wIdx = 2;
+			else if ( wheel === this.wheelBR ) wIdx = 3;
+
+			if ( wIdx >= 0 ) {
+
+				wheel.rotation.x = wd[ wIdx ].spin;
+
+				// Suspension visual: offset wheel Y by compression
+				// (negative Y = wheel moves up into chassis)
+				const restY = 0; // wheels are at their model rest position
+				wheel.position.y = restY - wd[ wIdx ].compression * 0.5;
+
+			}
+
+		}
+
+		// Front wheels steering
+		if ( this.wheelFL ) {
+
+			this.wheelFL.rotation.y = lerpAngle( this.wheelFL.rotation.y, - this._arcadeVehicle.currentSteerAngle, dt * 10 );
+
+		}
+
+		if ( this.wheelFR ) {
+
+			this.wheelFR.rotation.y = lerpAngle( this.wheelFR.rotation.y, - this._arcadeVehicle.currentSteerAngle, dt * 10 );
+
+		}
+
+	}
+
+	// ── Legacy sphere-based update ───────────────────────────────
+
+	_updateLegacy( dt, controlsInput ) {
 
 		this.inputX = controlsInput.x;
 		this.inputZ = controlsInput.z;
@@ -158,9 +428,6 @@ export class Vehicle {
 
 		}
 
-		// LINEAR_DAMP is applied server-side in VehicleSim — skip it here
-		// to avoid double-damping in multiplayer client-side prediction.
-		// In single-player there is no server, so we apply it directly.
 		if ( ! this.physicsWorld || ! this.physicsWorld._isServerWorld ) {
 
 			this.linearSpeed *= Math.max( 0, 1 - LINEAR_DAMP * dt );
@@ -299,9 +566,12 @@ export class Vehicle {
 
 		if ( ! serverState ) return;
 
+		const yOffset = this._useArcade ? 0 : - 0.5;
+
 		this.spherePos.set( serverState.sx, serverState.sy, serverState.sz );
-		this.container.position.set( serverState.sx, serverState.sy - 0.5, serverState.sz );
+		this.container.position.set( serverState.sx, serverState.sy + yOffset, serverState.sz );
 		this.container.quaternion.set( serverState.sqx, serverState.sqy, serverState.sqz, serverState.sqw );
+
 
 		this.linearSpeed = serverState.linearSpeed;
 		this.acceleration = serverState.acceleration;
@@ -316,8 +586,17 @@ export class Vehicle {
 
 		}
 
-		this.updateBody( dt );
-		this.updateWheels( dt );
+		if ( this._useArcade ) {
+
+			this._updateBodyArcade( dt );
+			this._updateWheelsArcade( dt );
+
+		} else {
+
+			this.updateBody( dt );
+			this.updateWheels( dt );
+
+		}
 
 	}
 
@@ -326,42 +605,78 @@ export class Vehicle {
 
 		if ( ! serverState || ! this.rigidBody || ! this.physicsWorld ) return;
 
-		const RATE = 0.1;
-		const SNAP_THRESHOLD = 5.0;
+		// Decrement post-contact cooldown each frame
+		if ( this._postContactFrames > 0 ) this._postContactFrames--;
+
+		const SNAP_THRESHOLD = 8.0;
 
 		const sx = serverState.sx;
 		const sy = serverState.sy;
 		const sz = serverState.sz;
 
-		const dx = sx - this.spherePos.x;
-		const dy = sy - this.spherePos.y;
-		const dz = sz - this.spherePos.z;
+		// Always read current position from the physics body (authoritative after this frame's update)
+		const curPos = this.rigidBody.position;
+		const dx = sx - curPos[ 0 ];
+		const dy = sy - curPos[ 1 ];
+		const dz = sz - curPos[ 2 ];
 		const error = Math.sqrt( dx * dx + dy * dy + dz * dz );
 
 		if ( error > SNAP_THRESHOLD ) {
 
-			// Hard snap for teleports / respawns
+			// Hard snap: teleport to server position, keep server orientation
 			rigidBody.setPosition( this.physicsWorld, this.rigidBody, [ sx, sy, sz ], false );
-			rigidBody.setLinearVelocity( this.physicsWorld, this.rigidBody, [ 0, 0, 0 ] );
-			rigidBody.setAngularVelocity( this.physicsWorld, this.rigidBody, [ 0, 0, 0 ] );
 			this.spherePos.set( sx, sy, sz );
 
-		} else if ( error > 0.01 ) {
+			if ( this._useArcade ) {
 
-			// Soft correction: nudge physics body toward server position
-			const cx = this.spherePos.x + dx * RATE;
-			const cy = this.spherePos.y + dy * RATE;
-			const cz = this.spherePos.z + dz * RATE;
+				rigidBody.setQuaternion( this.physicsWorld, this.rigidBody,
+					[ serverState.sqx, serverState.sqy, serverState.sqz, serverState.sqw ], false );
+
+			}
+
+			this._postContactFrames = 0;
+
+		} else if ( error > 0.05 ) {
+
+			// During post-contact frames: apply a much gentler correction so physics can settle
+			// without blocking it entirely (which caused divergence to build up → saccade on resume).
+			const inContact = this._postContactFrames > 0;
+			const rate = inContact
+				? Math.min( 0.02, error * 0.03 )   // very gentle during contact
+				: Math.min( 0.1, error * 0.2 );     // normal soft correction otherwise
+
+			const cx = curPos[ 0 ] + dx * rate;
+			const cy = curPos[ 1 ] + dy * rate;
+			const cz = curPos[ 2 ] + dz * rate;
 			rigidBody.setPosition( this.physicsWorld, this.rigidBody, [ cx, cy, cz ], false );
 
 		}
 
-		// Soft rotation correction
-		_currQ.set( serverState.sqx, serverState.sqy, serverState.sqz, serverState.sqw );
-		this.container.quaternion.slerp( _currQ, RATE );
+		// Rotation correction — reduced during contact to avoid physics-induced flips
+		if ( this._useArcade ) {
 
-		// Nudge speed toward server
-		this.linearSpeed = this.linearSpeed + ( serverState.linearSpeed - this.linearSpeed ) * RATE;
+			if ( error < 2.0 ) {
+
+				const inContact = this._postContactFrames > 0;
+				const rotRate = inContact ? 0.01 : 0.03;
+				const bq = this.rigidBody.quaternion;
+				_currQ.set( bq[ 0 ], bq[ 1 ], bq[ 2 ], bq[ 3 ] );
+				_quat.set( serverState.sqx, serverState.sqy, serverState.sqz, serverState.sqw );
+				_currQ.slerp( _quat, rotRate );
+				rigidBody.setQuaternion( this.physicsWorld, this.rigidBody,
+					[ _currQ.x, _currQ.y, _currQ.z, _currQ.w ], false );
+
+			}
+
+		} else {
+
+			_currQ.set( serverState.sqx, serverState.sqy, serverState.sqz, serverState.sqw );
+			this.container.quaternion.slerp( _currQ, 0.1 );
+
+		}
+
+		// Nudge speed toward server — faster rate so divergence after a wall hit resolves quickly
+		this.linearSpeed = this.linearSpeed + ( serverState.linearSpeed - this.linearSpeed ) * 0.15;
 
 	}
 

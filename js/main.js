@@ -7,13 +7,13 @@ import { RemoteVehicle } from './RemoteVehicle.js';
 import { Camera } from './Camera.js';
 import { Controls } from './Controls.js';
 import { buildTrack, encodeCells, decodeCells, computeSpawnPosition, computeTrackBounds } from './Track.js';
-import { buildWallColliders, createSphereBody, createKinematicSphereBody } from './Physics.js';
+import { buildWallColliders, createSphereBody, createChassisBody, createKinematicSphereBody, initRayFilter } from './Physics.js';
 import { SmokeTrails } from './Particles.js';
 import { GameAudio } from './Audio.js';
 import { Network } from './Network.js';
 import { Lobby } from './Lobby.js';
 import { RaceHUD } from './RaceHUD.js';
-import { VEHICLE_STATS } from './VehicleStats.js';
+import { VEHICLE_STATS, USE_ARCADE_VEHICLE } from './VehicleStats.js';
 
 
 const renderer = new THREE.WebGLRenderer( { antialias: true, outputBufferType: THREE.HalfFloatType } );
@@ -31,6 +31,7 @@ bloomPass.threshold = 0.5;
 renderer.setEffects( [ bloomPass ] );
 
 document.body.appendChild( renderer.domElement );
+renderer.domElement.classList.add( 'hidden' ); // hidden until a race starts
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color( 0xadb2ba );
@@ -125,9 +126,9 @@ function setupScene( customCells ) {
 	scene.fog.near = groundSize * 0.4;
 	scene.fog.far = groundSize * 0.8;
 
-	buildTrack( scene, models, customCells );
+	const trackObjects = buildTrack( scene, models, customCells );
 
-	return bounds;
+	return { bounds, trackObjects };
 
 }
 
@@ -135,7 +136,9 @@ function setupScene( customCells ) {
 
 function initSinglePlayer( customCells, spawn, vehicleKey ) {
 
-	const bounds = setupScene( customCells );
+	renderer.domElement.classList.remove( 'hidden' );
+
+	const { bounds } = setupScene( customCells );
 	const groundSize = Math.max( bounds.halfWidth, bounds.halfDepth ) * 2 + 20;
 
 	registerAll();
@@ -167,13 +170,22 @@ function initSinglePlayer( customCells, spawn, vehicleKey ) {
 		restitution: 0.0,
 	} );
 
-	const sphereBody = createSphereBody( world, spawn ? spawn.position : null );
-
 	const vKey = vehicleKey || 'yellow';
 	const vStats = VEHICLE_STATS[ vKey ] || VEHICLE_STATS.yellow;
+
+	const sphereBody = USE_ARCADE_VEHICLE
+		? createChassisBody( world, spawn ? spawn.position : null, vStats )
+		: createSphereBody( world, spawn ? spawn.position : null );
+
 	const vehicle = new Vehicle( vStats );
 	vehicle.rigidBody = sphereBody;
 	vehicle.physicsWorld = world;
+
+	if ( USE_ARCADE_VEHICLE ) {
+
+		vehicle._rayFilter = initRayFilter( world );
+
+	}
 
 	if ( spawn ) {
 
@@ -205,17 +217,25 @@ function initSinglePlayer( customCells, spawn, vehicleKey ) {
 
 			if ( bodyA !== sphereBody && bodyB !== sphereBody ) return;
 
-			_forward.set( 0, 0, 1 ).applyQuaternion( vehicle.container.quaternion );
-			_forward.y = 0;
-			_forward.normalize();
-
-			const impactVelocity = Math.abs( vehicle.modelVelocity.dot( _forward ) );
+			const vel = sphereBody.motionProperties.linearVelocity;
+			const impactVelocity = Math.sqrt( vel[ 0 ] * vel[ 0 ] + vel[ 2 ] * vel[ 2 ] );
 			audio.playImpact( impactVelocity );
+
+			// Speed penalty: reduce rigid body velocity on wall hit
+			if ( impactVelocity > 1 ) {
+
+				const keep = Math.max( 0.4, 1 - impactVelocity * 0.08 );
+				rigidBody.setLinearVelocity( world, sphereBody, [
+					vel[ 0 ] * keep, vel[ 1 ], vel[ 2 ] * keep
+				] );
+
+			}
 
 		}
 	};
 
 	const timer = new THREE.Timer();
+	timer.update(); // consume the initial delta so first frame starts at dt≈0
 
 	function animate() {
 
@@ -252,7 +272,9 @@ function initSinglePlayer( customCells, spawn, vehicleKey ) {
 
 function initMultiplayer( network, lobby, customCells, initialPhase, initialCountdown, vehicleKey ) {
 
-	const bounds = setupScene( customCells );
+	renderer.domElement.classList.remove( 'hidden' );
+
+	const { bounds, trackObjects } = setupScene( customCells );
 
 	const vKey = vehicleKey || 'yellow';
 	const vStats = VEHICLE_STATS[ vKey ] || VEHICLE_STATS.yellow;
@@ -327,12 +349,14 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 			if ( ! localSphereBody ) return;
 			if ( bodyA !== localSphereBody && bodyB !== localSphereBody ) return;
 
-			_forward.set( 0, 0, 1 ).applyQuaternion( vehicle.container.quaternion );
-			_forward.y = 0;
-			_forward.normalize();
-
-			const impactVelocity = Math.abs( vehicle.modelVelocity.dot( _forward ) );
+			const vel = localSphereBody.motionProperties.linearVelocity;
+			const impactVelocity = Math.sqrt( vel[ 0 ] * vel[ 0 ] + vel[ 2 ] * vel[ 2 ] );
 			audio.playImpact( impactVelocity );
+
+			// In multiplayer, the server is authoritative for speed penalties — only play sound locally.
+			// Slow down reconciliation for a few frames so physics can settle after the impact
+			// before server correction is applied (avoids flips/180s from mid-contact corrections).
+			vehicle._postContactFrames = 4;
 
 		}
 	};
@@ -355,9 +379,17 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 			const spawnPos = myState ? [ myState.sx, myState.sy, myState.sz ] : null;
 
 			// Create local physics body for prediction
-			localSphereBody = createSphereBody( localWorld, spawnPos );
+			localSphereBody = USE_ARCADE_VEHICLE
+				? createChassisBody( localWorld, spawnPos, vStats )
+				: createSphereBody( localWorld, spawnPos );
 			vehicle.rigidBody = localSphereBody;
 			vehicle.physicsWorld = localWorld;
+
+			if ( USE_ARCADE_VEHICLE ) {
+
+				vehicle._rayFilter = initRayFilter( localWorld );
+
+			}
 
 			if ( myState ) {
 
@@ -425,31 +457,37 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 
 	function handleReturnToLobby() {
 
-		cleanupMultiplayer();
-		hud.hideAll();
-		lobby.show();
-		network.onPlayerAdd    = () => updateLobbyPlayers( network, lobby );
-		network.onPlayerRemove = () => updateLobbyPlayers( network, lobby );
-		lobby.showRoom( network.roomId, isHost, network.roomCode );
-		updateLobbyPlayers( network, lobby );
+		hud.hideResults( true );
+		// Small delay to let the exit animation complete before cleanup
+		setTimeout( () => {
 
-		lobby.onStartRace = ( { mode, laps } ) => {
+			cleanupMultiplayer();
+			hud.hideAll();
+			lobby.show();
+			network.onPlayerAdd    = () => updateLobbyPlayers( network, lobby );
+			network.onPlayerRemove = () => updateLobbyPlayers( network, lobby );
+			lobby.showRoom( network.roomId, isHost, network.roomCode );
+			updateLobbyPlayers( network, lobby );
 
-			network.sendStartRace( mode, laps );
+			lobby.onStartRace = ( { mode, laps } ) => {
 
-		};
+				network.sendStartRace( mode, laps );
 
-		// Re-arm phase listener so the next race start re-launches initMultiplayer
-		network.onPhaseChange = ( phase, countdown ) => {
+			};
 
-			if ( phase === 'countdown' || phase === 'racing' ) {
+			// Re-arm phase listener so the next race start re-launches initMultiplayer
+			network.onPhaseChange = ( phase, countdown ) => {
 
-				lobby.hide();
-				initMultiplayer( network, lobby, customCells, phase, countdown, vKey );
+				if ( phase === 'countdown' || phase === 'racing' ) {
 
-			}
+					lobby.hide();
+					initMultiplayer( network, lobby, customCells, phase, countdown, vKey );
 
-		};
+				}
+
+			};
+
+		}, 280 );
 
 	}
 
@@ -488,6 +526,13 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 
 		running = false;
 
+		// Remove track and decorations from scene
+		for ( const obj of trackObjects ) {
+
+			scene.remove( obj );
+
+		}
+
 		// Dispose all remote vehicles and their proxy bodies
 		for ( const remote of remoteVehicles.values() ) {
 
@@ -507,6 +552,12 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 			scene.remove( vehicle.container );
 
 		}
+
+		// Reset dirLight target to avoid dangling reference
+		dirLight.target = dirLight; // self-target = no effect
+
+		// Hide the canvas — the lobby is pure DOM, no need for a stale game frame behind it
+		renderer.domElement.classList.add( 'hidden' );
 
 	}
 
@@ -531,6 +582,7 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 	// ── Game loop with client-side prediction ─────────────
 
 	const timer = new THREE.Timer();
+	timer.update(); // consume the initial delta so first frame starts at dt≈0
 
 	function animate() {
 
@@ -550,7 +602,19 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 
 			if ( isFrozen ) {
 
-				// During countdown/finish, apply server state directly (no local physics)
+				// During countdown/finish: pin physics body to server position before
+				// stepping so it is already settled when racing begins — prevents the jump.
+				if ( myState && vehicle.rigidBody ) {
+
+					rigidBody.setPosition( localWorld, vehicle.rigidBody,
+						[ myState.sx, myState.sy, myState.sz ], true );
+					rigidBody.setLinearVelocity( localWorld, vehicle.rigidBody, [ 0, 0, 0 ] );
+					rigidBody.setAngularVelocity( localWorld, vehicle.rigidBody, [ 0, 0, 0 ] );
+
+				}
+
+				// Step physics so the engine keeps the body awake and correctly placed
+				updateWorld( localWorld, localContactListener, dt );
 				vehicle.updateFromServer( dt, myState );
 
 			} else {

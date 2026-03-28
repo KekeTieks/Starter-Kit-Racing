@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { USE_ARCADE_VEHICLE } from './VehicleStats.js';
 
 const _currQ = new THREE.Quaternion();
 
@@ -81,9 +82,10 @@ export class RemoteVehicle {
         this.spherePos.y += ( serverState.sy - this.spherePos.y ) * lerpFactor;
         this.spherePos.z += ( serverState.sz - this.spherePos.z ) * lerpFactor;
 
+        const yOffset = USE_ARCADE_VEHICLE ? 0 : - 0.5;
         this.container.position.set(
             this.spherePos.x,
-            this.spherePos.y - 0.5,
+            this.spherePos.y + yOffset,
             this.spherePos.z
         );
 

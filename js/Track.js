@@ -308,6 +308,8 @@ export function buildTrack( scene, models, customCells ) {
 
 	} );
 
+	const sceneObjects = [ trackGroup ];
+
 	if ( ! customCells ) {
 
 		for ( const [ key, x, y, z, rotDeg ] of NPC_TRUCKS ) {
@@ -329,10 +331,13 @@ export function buildTrack( scene, models, customCells ) {
 
 			} );
 			scene.add( npc );
+			sceneObjects.push( npc );
 
 		}
 
 	}
+
+	return sceneObjects;
 
 }
 

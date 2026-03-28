@@ -206,9 +206,12 @@ export class RaceHUD {
 
             const pos = e.finished ? `#${ e.finishPosition }` : 'DNF';
             const time = e.finished ? formatTime( e.totalTime ) : '--';
+            const rankClass = e.finished
+                ? ( e.finishPosition <= 3 ? ` rank-${ e.finishPosition }` : '' )
+                : ' dnf';
 
             const label = escHtml( e.username || ( e.color + ' truck' ) );
-            return `<div class="hud-result-row">
+            return `<div class="hud-result-row${ rankClass }">
                 <span class="hud-result-pos">${ pos }</span>
                 <span class="hud-result-color" style="--truck-color: ${ truckColor( e.color ) }">${ label }</span>
                 <span class="hud-result-time">${ time }</span>
@@ -250,10 +253,25 @@ export class RaceHUD {
 
     }
 
-    hideResults() {
+    hideResults( animated = false ) {
 
-        this.resultsEl.style.display = 'none';
-        this.resultsEl.innerHTML = '';
+        const panel = this.resultsEl.querySelector( '.hud-results-panel' );
+        if ( animated && panel ) {
+
+            gsap.to( panel, {
+                opacity: 0, y: 16, scale: 0.97, duration: 0.25, ease: 'power2.in',
+                onComplete: () => {
+                    this.resultsEl.style.display = 'none';
+                    this.resultsEl.innerHTML = '';
+                }
+            } );
+
+        } else {
+
+            this.resultsEl.style.display = 'none';
+            this.resultsEl.innerHTML = '';
+
+        }
 
     }
 

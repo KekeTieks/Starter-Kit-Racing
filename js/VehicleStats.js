@@ -1,34 +1,139 @@
 // Vehicle stats — used by both client (Vehicle.js) and lobby (Lobby.js)
 // Server uses server/simulation/VehicleStats.js (identical copy, no ES module boundary issue)
 
+export const USE_ARCADE_VEHICLE = true; // false = legacy sphere model
+
+// Shared chassis geometry
+export const CHASSIS_HALF_EXTENTS = [ 0.5, 0.2, 0.75 ];
+export const CHASSIS_OFFSET_Y = 0.35;
+
+// Legacy sphere stats (kept for rollback)
+export const LEGACY_STATS = {
+	yellow:  { maxSpeed: 1.0, accelRate: 6, steeringMult: 4.0, driveMult: 100 },
+	green:   { maxSpeed: 0.9, accelRate: 8, steeringMult: 5.5, driveMult: 90 },
+	purple:  { maxSpeed: 1.1, accelRate: 5, steeringMult: 3.5, driveMult: 115 },
+	red:     { maxSpeed: 1.0, accelRate: 7, steeringMult: 4.5, driveMult: 100 },
+};
+
 export const VEHICLE_STATS = {
 	yellow: {
-		maxSpeed:     1.0,
+		// Engine
+		maxSpeed:     1.0,          // relative multiplier for top speed
+		engineForce:  3000,         // raw Newton force
+		brakeForce:   4000,
+		driveMult:    100,
+		// Steering
+		maxSteerAngle:        0.5,
+		steerSpeed:           5.0,
+		speedSteerReduction:  0.5,
+		// Suspension
+		suspensionRestLength: 0.15,
+		springStiffness:      25000,
+		dampingCompression:   3000,
+		dampingRelaxation:    2000,
+		// Grip
+		gripFront:        3.0,
+		gripRear:         3.0,
+		driftGripRear:    0.5,
+		driftThreshold:   3.0,
+		gripRecoveryRate: 5.0,
+		// Physics
+		mass:             500,
+		dragCoefficient:  5.0,      // quadratic drag → defines top speed
+		rollingResistance: 10.0,    // constant low drag
+		antiRollStiffness: 5000,
+		// Geometry
+		wheelBase:   1.2,
+		trackWidth:  0.8,
+		wheelRadius: 0.15,
+		// Legacy (kept for compatibility)
 		accelRate:    6,
 		steeringMult: 4.0,
-		driveMult:    100,
 		// Display bars (out of 5)
 		display: { speed: 3, handling: 3, acceleration: 3 },
 	},
 	green: {
 		maxSpeed:     0.9,
+		engineForce:  2800,
+		brakeForce:   3800,
+		driveMult:    90,
+		maxSteerAngle:        0.55,
+		steerSpeed:           6.0,
+		speedSteerReduction:  0.4,
+		suspensionRestLength: 0.15,
+		springStiffness:      22000,
+		dampingCompression:   2800,
+		dampingRelaxation:    1800,
+		gripFront:        3.5,
+		gripRear:         3.5,
+		driftGripRear:    0.6,
+		driftThreshold:   3.5,
+		gripRecoveryRate: 6.0,
+		mass:             450,
+		dragCoefficient:  5.5,
+		rollingResistance: 10.0,
+		antiRollStiffness: 4000,
+		wheelBase:   1.2,
+		trackWidth:  0.8,
+		wheelRadius: 0.15,
 		accelRate:    8,
 		steeringMult: 5.5,
-		driveMult:    90,
 		display: { speed: 2, handling: 5, acceleration: 4 },
 	},
 	purple: {
 		maxSpeed:     1.1,
+		engineForce:  3500,
+		brakeForce:   4500,
+		driveMult:    115,
+		maxSteerAngle:        0.45,
+		steerSpeed:           4.0,
+		speedSteerReduction:  0.6,
+		suspensionRestLength: 0.15,
+		springStiffness:      28000,
+		dampingCompression:   3200,
+		dampingRelaxation:    2200,
+		gripFront:        2.5,
+		gripRear:         2.5,
+		driftGripRear:    0.4,
+		driftThreshold:   2.5,
+		gripRecoveryRate: 4.0,
+		mass:             550,
+		dragCoefficient:  4.5,
+		rollingResistance: 8.0,
+		antiRollStiffness: 6000,
+		wheelBase:   1.2,
+		trackWidth:  0.8,
+		wheelRadius: 0.15,
 		accelRate:    5,
 		steeringMult: 3.5,
-		driveMult:    115,
 		display: { speed: 4, handling: 2, acceleration: 2 },
 	},
 	red: {
 		maxSpeed:     1.0,
+		engineForce:  3200,
+		brakeForce:   3800,
+		driveMult:    100,
+		maxSteerAngle:        0.5,
+		steerSpeed:           5.5,
+		speedSteerReduction:  0.45,
+		suspensionRestLength: 0.3,
+		springStiffness:      24000,
+		dampingCompression:   2900,
+		dampingRelaxation:    1900,
+		gripFront:        3.0,
+		gripRear:         2.8,
+		driftGripRear:    0.35,
+		driftThreshold:   2.5,
+		gripRecoveryRate: 3.5,
+		mass:             480,
+		dragCoefficient:  5.0,
+		rollingResistance: 9.0,
+		antiRollStiffness: 4500,
+		wheelBase:   1.2,
+		trackWidth:  0.8,
+		wheelRadius: 0.15,
 		accelRate:    7,
 		steeringMult: 4.5,
-		driveMult:    100,
 		display: { speed: 3, handling: 4, acceleration: 4 },
 	},
 };

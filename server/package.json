@@ -7,9 +7,11 @@
     "start": "node index.js"
   },
   "dependencies": {
-    "colyseus": "^0.17.8",
     "@colyseus/schema": "^4.0.19",
+    "bcryptjs": "^3.0.3",
+    "colyseus": "^0.17.8",
     "crashcat": "^0.0.2",
-    "express": "^5.1.0"
+    "express": "^5.1.0",
+    "pg": "^8.20.0"
   }
 }

@@ -111,6 +111,7 @@
 		<div class="separator"></div>
 		<button id="btn-play" class="action">Play</button>
 		<button id="btn-share" class="action">Share</button>
+		<button id="btn-save-library" class="action">Save to Library</button>
 		<div class="separator"></div>
 		<button id="btn-clear" class="danger">Clear</button>
 	</div>
@@ -121,6 +122,7 @@
 	import * as THREE from 'three';
 	import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 	import { ORIENT_DEG, CELL_RAW, GRID_SCALE, encodeCells, decodeCells } from './js/Track.js';
+	import { saveCircuit } from './js/CircuitLibrary.js';
 
 	// ─── Auto-tile lookup ─────────────────────────────────────
 	// Bitmask: N=8 S=4 E=2 W=1
@@ -959,6 +961,24 @@
 
 		clearAll();
 		showToast( 'Track cleared' );
+
+	} );
+
+	document.getElementById( 'btn-save-library' ).addEventListener( 'click', () => {
+
+		if ( grid.size === 0 ) {
+
+			showToast( 'Draw some road first!' );
+			return;
+
+		}
+
+		const name = prompt( 'Nom du circuit :', 'Mon circuit' );
+		if ( ! name || ! name.trim() ) return;
+
+		const cells = getCellsArray();
+		saveCircuit( name.trim(), cells );
+		showToast( `"${ name.trim() }" sauvegardé dans la bibliothèque !` );
 
 	} );
 

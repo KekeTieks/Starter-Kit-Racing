@@ -6,13 +6,14 @@ import { Vehicle } from './Vehicle.js';
 import { RemoteVehicle } from './RemoteVehicle.js';
 import { Camera } from './Camera.js';
 import { Controls } from './Controls.js';
-import { buildTrack, decodeCells, computeSpawnPosition, computeTrackBounds } from './Track.js';
+import { buildTrack, encodeCells, decodeCells, computeSpawnPosition, computeTrackBounds } from './Track.js';
 import { buildWallColliders, createSphereBody, createKinematicSphereBody } from './Physics.js';
 import { SmokeTrails } from './Particles.js';
 import { GameAudio } from './Audio.js';
 import { Network } from './Network.js';
 import { Lobby } from './Lobby.js';
 import { RaceHUD } from './RaceHUD.js';
+import { VEHICLE_STATS } from './VehicleStats.js';
 
 
 const renderer = new THREE.WebGLRenderer( { antialias: true, outputBufferType: THREE.HalfFloatType } );
@@ -132,7 +133,7 @@ function setupScene( customCells ) {
 
 // ─── Single-player ────────────────────────────────────────
 
-function initSinglePlayer( customCells, spawn ) {
+function initSinglePlayer( customCells, spawn, vehicleKey ) {
 
 	const bounds = setupScene( customCells );
 	const groundSize = Math.max( bounds.halfWidth, bounds.halfDepth ) * 2 + 20;
@@ -168,7 +169,9 @@ function initSinglePlayer( customCells, spawn ) {
 
 	const sphereBody = createSphereBody( world, spawn ? spawn.position : null );
 
-	const vehicle = new Vehicle();
+	const vKey = vehicleKey || 'yellow';
+	const vStats = VEHICLE_STATS[ vKey ] || VEHICLE_STATS.yellow;
+	const vehicle = new Vehicle( vStats );
 	vehicle.rigidBody = sphereBody;
 	vehicle.physicsWorld = world;
 
@@ -181,7 +184,7 @@ function initSinglePlayer( customCells, spawn ) {
 
 	}
 
-	const vehicleGroup = vehicle.init( models[ 'vehicle-truck-yellow' ] );
+	const vehicleGroup = vehicle.init( models[ COLOR_TO_MODEL[ vKey ] || 'vehicle-truck-yellow' ], vStats );
 	scene.add( vehicleGroup );
 
 	dirLight.target = vehicleGroup;
@@ -247,11 +250,13 @@ function initSinglePlayer( customCells, spawn ) {
 
 // ─── Multiplayer ──────────────────────────────────────────
 
-function initMultiplayer( network, lobby, customCells, initialPhase, initialCountdown ) {
+function initMultiplayer( network, lobby, customCells, initialPhase, initialCountdown, vehicleKey ) {
 
 	const bounds = setupScene( customCells );
 
-	const vehicle = new Vehicle();
+	const vKey = vehicleKey || 'yellow';
+	const vStats = VEHICLE_STATS[ vKey ] || VEHICLE_STATS.yellow;
+	const vehicle = new Vehicle( vStats );
 	const remoteVehicles = new Map();
 	const remoteProxyBodies = new Map(); // sessionId → kinematic body in localWorld
 
@@ -336,7 +341,11 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 
 	function spawnPlayer( sessionId, color ) {
 
-		const modelName = COLOR_TO_MODEL[ color ] || 'vehicle-truck-yellow';
+		// For local player, prefer server-confirmed vehicle (may differ from request if color conflict)
+		const vehicleColor = sessionId === network.sessionId
+			? ( network.getMyState()?.vehicle || color )
+			: color;
+		const modelName = COLOR_TO_MODEL[ vehicleColor ] || 'vehicle-truck-yellow';
 
 		if ( sessionId === network.sessionId ) {
 
@@ -358,7 +367,7 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 
 			}
 
-			const vehicleGroup = vehicle.init( models[ modelName ] );
+			const vehicleGroup = vehicle.init( models[ modelName ], vStats );
 			scene.add( vehicleGroup );
 			dirLight.target = vehicleGroup;
 			cam.targetPosition.copy( vehicle.spherePos );
@@ -419,7 +428,9 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 		cleanupMultiplayer();
 		hud.hideAll();
 		lobby.show();
-		lobby.showRoom( network.roomId, isHost );
+		network.onPlayerAdd    = () => updateLobbyPlayers( network, lobby );
+		network.onPlayerRemove = () => updateLobbyPlayers( network, lobby );
+		lobby.showRoom( network.roomId, isHost, network.roomCode );
 		updateLobbyPlayers( network, lobby );
 
 		lobby.onStartRace = ( { mode, laps } ) => {
@@ -434,7 +445,7 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 			if ( phase === 'countdown' || phase === 'racing' ) {
 
 				lobby.hide();
-				initMultiplayer( network, lobby, customCells, phase, countdown );
+				initMultiplayer( network, lobby, customCells, phase, countdown, vKey );
 
 			}
 
@@ -599,9 +610,11 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 function updateLobbyPlayers( network, lobby ) {
 
 	const players = [];
+	let first = true;
 	for ( const state of network.playerStates.values() ) {
 
-		players.push( { color: state.color } );
+		players.push( { color: state.color, username: state.username || '', isHost: first } );
+		first = false;
 
 	}
 	lobby.updatePlayers( players );
@@ -625,19 +638,17 @@ async function init() {
 	const mapParam = params.get( 'map' );
 	const roomParam = params.get( 'room' );
 
-	let customCells = null;
-	let spawn = null;
-
+	// URL ?map= fallback (from editor share link)
+	let urlCells = null;
 	if ( mapParam ) {
 
 		try {
 
-			customCells = decodeCells( mapParam );
-			spawn = computeSpawnPosition( customCells );
+			urlCells = decodeCells( mapParam );
 
 		} catch ( e ) {
 
-			console.warn( 'Invalid map parameter, using default track' );
+			console.warn( 'Invalid map parameter, using lobby selection' );
 
 		}
 
@@ -646,73 +657,183 @@ async function init() {
 	const lobby = new Lobby();
 	const network = new Network();
 
+	// Resolve cells: lobby selection → URL param → server mapData → null (default in Track.js)
+	function getActiveCells() {
+
+		const lobbyCells = lobby.getSelectedCells();
+		if ( lobbyCells ) return lobbyCells;
+		if ( urlCells ) return urlCells;
+
+		// Guest joining via ?room= link: decode track from server state
+		const serverMap = network.roomMapData;
+		if ( serverMap ) {
+
+			try { return decodeCells( serverMap ); } catch ( _e ) { /* ignore */ }
+
+		}
+
+		return null;
+
+	}
+
+	// Encode the active circuit for the server. Priority: lobby selection → URL ?map= → ''
+	function getMapParam() {
+
+		const cells = lobby.getSelectedCells();
+		if ( cells ) return encodeCells( cells );
+		return mapParam || '';
+
+	}
+
 	async function startMultiplayer( roomId ) {
+
+		const vehicleKey = lobby.getVehicle();
+		const username   = lobby.getUsername();
 
 		lobby.showConnecting();
 
 		try {
 
-			await network.connect( getServerUrl(), mapParam, roomId || null );
+			await network.connect( getServerUrl(), getMapParam(), roomId || null, username, vehicleKey );
+		await waitForMyState();
 
 		} catch ( e ) {
 
 			console.error( 'Connection failed:', e );
+			network.disconnect();
 			const msg = e.message && e.message.includes( 'full' )
 				? 'Room is full. Try creating a new one.'
-				: `Failed to connect: ${ e.message || 'server unreachable' }`;
+				: e.message || 'Serveur inaccessible';
 			lobby.showError( msg );
 			return;
 
 		}
 
-		// Wait for local player state to arrive
-		await new Promise( ( resolve ) => {
-
-			if ( network.getMyState() ) {
-
-				resolve();
-				return;
-
-			}
-
-			const originalOnAdd = network.onPlayerAdd;
-			network.onPlayerAdd = ( sessionId, color ) => {
-
-				if ( originalOnAdd ) originalOnAdd( sessionId, color );
-				if ( sessionId === network.sessionId ) resolve();
-
-			};
-
-		} );
-
 		// Determine if this player is the host (first player in the room)
 		const isHost = ! roomId;
-		lobby.showRoom( network.roomId, isHost );
+		setupLobbyCallbacks( vehicleKey );
+		lobby.showRoom( network.roomId, isHost, network.roomCode );
 		updateLobbyPlayers( network, lobby );
 
-		// Host: lobby stays visible until they click Start
-		// Guest: lobby stays visible until host starts (phase changes)
-		lobby.onStartRace = ( { mode, laps } ) => {
+	}
 
-			network.sendStartRace( mode, laps );
+	// Helper: join a room by code (from mode screen)
+	async function joinByCode( code ) {
+
+		const vehicleKey = lobby.getVehicle();
+		const username   = lobby.getUsername();
+
+		lobby.showConnecting();
+
+		try {
+
+			await network.joinByCode( getServerUrl(), code, username, vehicleKey );
+		await waitForMyState();
+
+		} catch ( e ) {
+
+			network.disconnect();
+			lobby.showError( e.message || 'Code invalide' );
+			return;
+
+		}
+
+		setupLobbyCallbacks( vehicleKey );
+		lobby.showRoom( network.roomId, false, network.roomCode );
+		updateLobbyPlayers( network, lobby );
+
+	}
+
+	// Wire up all lobby ↔ network callbacks once the room lobby is shown
+	function setupLobbyCallbacks( vehicleKey ) {
+
+		lobby.onStartRace = ( { mode, laps } ) => network.sendStartRace( mode, laps );
+
+		lobby.onLeaveRoom = () => {
+
+			network.disconnect();
+			lobby._leaveRoom();
+			lobby._buildModeScreen();
 
 		};
 
-		// Listen for phase change to transition from lobby to game
+		// Host: send new map to server when circuit changes
+		lobby.onCircuitChange = ( cells ) => {
+
+			network.sendSetMap( encodeCells( cells ) );
+
+		};
+
+		// Clients: update circuit preview when server broadcasts a map change
+		network.onMapChange = ( mapData ) => {
+
+			if ( ! mapData ) return;
+			try {
+
+				const cells = decodeCells( mapData );
+				lobby.updateCircuit( cells, null );
+
+			} catch ( _e ) { /* ignore invalid map */ }
+
+		};
+
+		// Phase changes → start game
 		network.onPhaseChange = ( phase, countdown ) => {
 
 			if ( phase === 'countdown' || phase === 'racing' ) {
 
 				lobby.hide();
-				initMultiplayer( network, lobby, customCells, phase, countdown );
+				initMultiplayer( network, lobby, getActiveCells(), phase, countdown, vehicleKey );
 
 			}
 
 		};
 
+		network.onPlayerAdd    = () => updateLobbyPlayers( network, lobby );
+		network.onPlayerRemove = () => updateLobbyPlayers( network, lobby );
+
 	}
 
-	// If there's a room param, auto-join
+	// Helper: wait for the local player's state to appear in the network
+	function waitForMyState() {
+
+		return new Promise( ( resolve, reject ) => {
+
+			if ( network.getMyState() ) { resolve(); return; }
+
+			const TIMEOUT_MS = 10000;
+			const timer = setTimeout( () => {
+
+				reject( new Error( 'Timeout: le serveur ne répond pas' ) );
+
+			}, TIMEOUT_MS );
+
+			const done = () => clearTimeout( timer );
+
+			const origAdd = network.onPlayerAdd;
+			network.onPlayerAdd = ( sessionId, color ) => {
+
+				if ( origAdd ) origAdd( sessionId, color );
+				if ( sessionId === network.sessionId ) { done(); resolve(); }
+
+			};
+
+			const origDisconnect = network.onDisconnect;
+			network.onDisconnect = ( code ) => {
+
+				if ( origDisconnect ) origDisconnect( code );
+				done();
+				reject( new Error( 'Connexion perdue' ) );
+
+			};
+
+		} );
+
+	}
+
+	// If there's a ?room= param, go straight to mode screen so the user
+	// can enter identity info if needed, then auto-join via the join-by-code flow.
+	// If there's a ?room= param and identity is already set, auto-join directly.
 	if ( roomParam ) {
 
 		await startMultiplayer( roomParam );
@@ -722,14 +843,16 @@ async function init() {
 
 	lobby.onPlayOffline = () => {
 
+		const cells = getActiveCells();
+		const spawn = cells ? computeSpawnPosition( cells ) : null;
 		lobby.hide();
-		initSinglePlayer( customCells, spawn );
+		initSinglePlayer( cells, spawn, lobby.getVehicle() );
 
 	};
 
 	lobby.onPlayOnline = () => startMultiplayer( null );
 
-	lobby.onJoinRoom = ( roomId ) => startMultiplayer( roomId );
+	lobby.onJoinByCode = ( code ) => joinByCode( code );
 
 }
 

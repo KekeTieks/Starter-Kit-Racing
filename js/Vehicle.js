@@ -24,7 +24,10 @@ function lerpAngle( a, b, t ) {
 
 export class Vehicle {
 
-	constructor() {
+	constructor( stats ) {
+
+		// Vehicle-specific physics constants (from VehicleStats)
+		this._stats = stats || { maxSpeed: 1.0, accelRate: 6, steeringMult: 4.0, driveMult: 100 };
 
 		this.linearSpeed = 0;
 		this.angularSpeed = 0;
@@ -54,7 +57,9 @@ export class Vehicle {
 
 	}
 
-	init( model ) {
+	init( model, stats ) {
+
+		if ( stats ) this._stats = stats;
 
 		const vehicleModel = model.clone();
 
@@ -111,7 +116,7 @@ export class Vehicle {
 			const cross = _forward.x * this.inputZ - _forward.z * this.inputX;
 			this.inputX = - cross * 2;
 
-			this.linearSpeed = THREE.MathUtils.lerp( this.linearSpeed, 1, dt * 6 );
+			this.linearSpeed = THREE.MathUtils.lerp( this.linearSpeed, this._stats.maxSpeed, dt * this._stats.accelRate );
 
 		} else {
 
@@ -121,12 +126,12 @@ export class Vehicle {
 
 			const steeringGrip = THREE.MathUtils.clamp( Math.abs( this.linearSpeed ), 0.2, 1.0 );
 
-			const targetAngular = - this.inputX * steeringGrip * 4 * direction;
+			const targetAngular = - this.inputX * steeringGrip * this._stats.steeringMult * direction;
 			this.angularSpeed = THREE.MathUtils.lerp( this.angularSpeed, targetAngular, dt * 4 );
 
 			this.container.rotateY( this.angularSpeed * dt );
 
-			const targetSpeed = this.inputZ;
+			const targetSpeed = this.inputZ * this._stats.maxSpeed;
 
 			if ( targetSpeed < 0 && this.linearSpeed > 0.01 ) {
 
@@ -138,7 +143,7 @@ export class Vehicle {
 
 			} else {
 
-				this.linearSpeed = THREE.MathUtils.lerp( this.linearSpeed, targetSpeed, dt * 6 );
+				this.linearSpeed = THREE.MathUtils.lerp( this.linearSpeed, targetSpeed, dt * this._stats.accelRate );
 
 			}
 
@@ -173,7 +178,7 @@ export class Vehicle {
 			_right.normalize();
 
 			const angvel = this.rigidBody.motionProperties.angularVelocity;
-			const drive = this.linearSpeed * 100 * dt;
+			const drive = this.linearSpeed * this._stats.driveMult * dt;
 
 			rigidBody.setAngularVelocity( this.physicsWorld, this.rigidBody, [
 				angvel[ 0 ] + _right.x * drive,

@@ -16,8 +16,10 @@ export const PlayerState = schema({
     driftIntensity: "number",
     inputX: "number",
     inputZ: "number",
-    // Vehicle color
+    // Vehicle color and identity
     color: "string",
+    username: { type: "string", default: "" },
+    vehicle: { type: "string", default: "yellow" },
     // Race state per player
     currentLap: "number",
     lapTime: "number",
@@ -36,4 +38,5 @@ export const RaceState = schema({
     totalLaps: { type: "number", default: 3 },
     raceTimer: "number",
     finishCount: "number",
+    roomCode: { type: "string", default: "" },
 });

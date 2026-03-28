@@ -27,18 +27,34 @@ export class Network {
         this.onError = null;
         this.onPhaseChange = null;
         this.onPlayerFinished = null;
+        this.onMapChange = null;
 
         this._lastPhase = '';
         this._lastCountdown = -1;
+        this._lastMapData = '';
 
     }
 
-    async connect( serverUrl, mapData, roomId ) {
+    async connect( serverUrl, mapData, roomId, username, vehicle ) {
 
-        this.client = new Client( serverUrl );
+        // Rewrite all Colyseus-generated URLs to go through the current origin
+        // (Vite proxy in dev, same-origin in prod). Preserve http/https for REST,
+        // rewrite to ws/wss only for WebSocket requests.
+        const urlBuilder = ( url ) => {
+            const isWs = url.protocol === 'ws:' || url.protocol === 'wss:';
+            url.protocol = isWs
+                ? ( window.location.protocol === 'https:' ? 'wss:' : 'ws:' )
+                : window.location.protocol;
+            url.host = window.location.host;
+            return url.toString();
+        };
+
+        this.client = new Client( serverUrl, { urlBuilder } );
 
         const options = {};
         if ( mapData ) options.map = mapData;
+        if ( username ) options.username = username;
+        if ( vehicle )  options.vehicle  = vehicle;
 
         if ( roomId ) {
 
@@ -128,6 +144,8 @@ export class Network {
                     inputX: player.inputX,
                     inputZ: player.inputZ,
                     color: player.color,
+                    username: player.username || '',
+                    vehicle: player.vehicle || 'yellow',
                     currentLap: player.currentLap,
                     totalTime: player.totalTime,
                     lapTime: player.lapTime,
@@ -155,6 +173,8 @@ export class Network {
                 s.inputX = player.inputX;
                 s.inputZ = player.inputZ;
                 s.color = player.color;
+                s.username = player.username || '';
+                s.vehicle = player.vehicle || 'yellow';
                 s.currentLap = player.currentLap;
                 s.totalTime = player.totalTime;
                 s.lapTime = player.lapTime;
@@ -194,6 +214,14 @@ export class Network {
             this._lastPhase = phase;
             this._lastCountdown = countdown;
             if ( this.onPhaseChange ) this.onPhaseChange( phase, countdown );
+
+        }
+
+        const mapData = state.mapData || '';
+        if ( mapData !== this._lastMapData ) {
+
+            this._lastMapData = mapData;
+            if ( this.onMapChange ) this.onMapChange( mapData );
 
         }
 
@@ -237,6 +265,12 @@ export class Network {
             this.room.send( 'startRace', { mode, laps } );
 
         }
+
+    }
+
+    sendSetMap( mapData ) {
+
+        if ( this.room ) this.room.send( 'setMap', mapData );
 
     }
 
@@ -289,6 +323,33 @@ export class Network {
     get totalLaps() {
 
         return this.room ? this.room.state.totalLaps : 3;
+
+    }
+
+    get roomMapData() {
+
+        return ( this.room && this.room.state ) ? ( this.room.state.mapData || '' ) : '';
+
+    }
+
+    get roomCode() {
+
+        return ( this.room && this.room.state ) ? ( this.room.state.roomCode || '' ) : '';
+
+    }
+
+    async joinByCode( serverUrl, code, username, vehicle ) {
+
+        const res = await fetch( `${ serverUrl }/api/room-code/${ encodeURIComponent( code ) }` );
+
+        if ( ! res.ok ) {
+
+            throw new Error( 'Code de room introuvable' );
+
+        }
+
+        const { roomId } = await res.json();
+        await this.connect( serverUrl, '', roomId, username, vehicle );
 
     }
 

@@ -1,0 +1,61 @@
+services:
+
+  # ── PostgreSQL ────────────────────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       myrace
+      POSTGRES_USER:     myrace
+      POSTGRES_PASSWORD: myrace_secret
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U myrace -d myrace"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── Dev: Colyseus server with hot-reload ──────────────────────────────────────
+  server-dev:
+    image: node:22-slim
+    working_dir: /app/server
+    volumes:
+      - ./server:/app/server
+      - server_node_modules:/app/server/node_modules
+    ports:
+      - "2567:2567"
+    command: sh -c "npm install && npx nodemon --watch . --ext js,json --exec 'node index.js'"
+    environment:
+      PORT:         2567
+      DATABASE_URL: postgres://myrace:myrace_secret@db:5432/myrace
+      NODE_ENV:     development
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Dev: Vite client with HMR ─────────────────────────────────────────────────
+  client-dev:
+    image: node:22-slim
+    working_dir: /app
+    volumes:
+      - .:/app
+      - client_node_modules:/app/node_modules
+    ports:
+      - "3000:3000"
+    command: sh -c "npm install && npx vite --host 0.0.0.0 --port 3000"
+    environment:
+      NODE_ENV:        development
+      # Inside Docker, the server runs in service "server-dev", not localhost
+      VITE_SERVER_URL: http://server-dev:2567
+    depends_on:
+      - server-dev
+    restart: unless-stopped
+
+volumes:
+  pg_data:
+  server_node_modules:
+  client_node_modules:

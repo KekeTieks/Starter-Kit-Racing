@@ -1,7 +1,19 @@
 _benchmark/
 _godot/
 .DS_Store
+Thumbs.db
 
-# Server
+# Dependencies
+node_modules/
 server/node_modules/
+
+# Lock files
+package-lock.json
 server/package-lock.json
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+*.log

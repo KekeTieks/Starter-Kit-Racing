@@ -87,10 +87,13 @@ function quatNormalize( q ) {
 
 export class VehicleSim {
 
-    constructor( world, spawnPos, spawnAngle ) {
+    constructor( world, spawnPos, spawnAngle, stats ) {
 
         this.world = world;
         this.body = null;
+
+        // Vehicle-specific physics constants
+        this._stats = stats || { maxSpeed: 1.0, accelRate: 6, steeringMult: 4.0, driveMult: 100 };
 
         this.linearSpeed = 0;
         this.angularSpeed = 0;
@@ -143,7 +146,7 @@ export class VehicleSim {
             const cross = forward[ 0 ] * inputZ - forward[ 2 ] * inputX;
             inputX = -cross * 2;
 
-            this.linearSpeed = lerp( this.linearSpeed, 1, dt * 6 );
+            this.linearSpeed = lerp( this.linearSpeed, this._stats.maxSpeed, dt * this._stats.accelRate );
 
         } else {
 
@@ -152,7 +155,7 @@ export class VehicleSim {
             if ( direction === 0 ) direction = Math.abs( inputZ ) > 0.1 ? Math.sign( inputZ ) : 1;
 
             const steeringGrip = clamp( Math.abs( this.linearSpeed ), 0.2, 1.0 );
-            const targetAngular = -inputX * steeringGrip * 4 * direction;
+            const targetAngular = -inputX * steeringGrip * this._stats.steeringMult * direction;
             this.angularSpeed = lerp( this.angularSpeed, targetAngular, dt * 4 );
 
             // Rotate container
@@ -160,7 +163,7 @@ export class VehicleSim {
             this.quat = quatMultiply( this.quat, rotQuat );
             this.quat = quatNormalize( this.quat );
 
-            const targetSpeed = inputZ;
+            const targetSpeed = inputZ * this._stats.maxSpeed;
 
             if ( targetSpeed < 0 && this.linearSpeed > 0.01 ) {
 
@@ -172,7 +175,7 @@ export class VehicleSim {
 
             } else {
 
-                this.linearSpeed = lerp( this.linearSpeed, targetSpeed, dt * 6 );
+                this.linearSpeed = lerp( this.linearSpeed, targetSpeed, dt * this._stats.accelRate );
 
             }
 
@@ -189,7 +192,7 @@ export class VehicleSim {
             const rz = rLen > 0 ? right[ 2 ] / rLen : 0;
 
             const angvel = this.body.motionProperties.angularVelocity;
-            const drive = this.linearSpeed * 100 * dt;
+            const drive = this.linearSpeed * this._stats.driveMult * dt;
 
             rigidBody.setAngularVelocity( this.world, this.body, [
                 angvel[ 0 ] + rx * drive,

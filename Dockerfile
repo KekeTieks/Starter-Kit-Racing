@@ -1,15 +1,34 @@
-FROM node:22-slim
-
-RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
+# ── Stage 1: build the Vite client ───────────────────────────────────────────
+FROM node:22-slim AS client-build
 
 WORKDIR /app
 
-# Copy server dependencies first (better layer caching)
-COPY server/package.json server/package.json
+COPY package.json package-lock.json* ./
+RUN npm install
+
+COPY index.html editor.html vite.config.js ./
+COPY js/ ./js/
+COPY public/ ./public/
+
+RUN npm run build
+
+# ── Stage 2: production server ────────────────────────────────────────────────
+FROM node:22-slim AS prod
+
+WORKDIR /app
+
+# Server dependencies only
+COPY server/package.json server/package-lock.json* ./server/
 RUN cd server && npm install --omit=dev
 
-# Copy everything else
-COPY . .
+# Server source
+COPY server/ ./server/
+
+# Built client (dist/ → served as static files by express)
+COPY --from=client-build /app/dist ./dist
+
+ENV NODE_ENV=production
+ENV PORT=2567
 
 EXPOSE 2567
 

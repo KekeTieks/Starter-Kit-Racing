@@ -3,11 +3,15 @@ import { updateWorld, rigidBody } from 'crashcat';
 import { RaceState, PlayerState } from '../schema/RaceState.js';
 import { initPhysics, createSphereBody } from '../simulation/PhysicsWorld.js';
 import { VehicleSim } from '../simulation/VehicleSim.js';
+import { VEHICLE_STATS } from '../simulation/VehicleStats.js';
 import {
     DEFAULT_CELLS, decodeCells,
     computeSpawnPositions, computeSpawnPosition,
     computeFinishLine, computeCheckpoints
 } from '../simulation/TrackData.js';
+import { registerRoomCode, unregisterRoomCode } from '../RoomCodeRegistry.js';
+import { query } from '../db/client.js';
+import { computeRaceRewards, computeLevel, xpForLevel } from '../db/xp.js';
 
 const COLORS = [ 'yellow', 'green', 'purple', 'red' ];
 const TICK_RATE = 60;
@@ -35,6 +39,11 @@ export class RaceRoom extends Room {
         this.state.mapData = mapData;
         this.state.mode = 'sandbox';
         this.state.phase = 'waiting';
+
+        // Register a short room code for this room
+        this.roomCode = registerRoomCode( this.roomId );
+        this.state.roomCode = this.roomCode;
+        console.log( `Room ${ this.roomId } registered with code ${ this.roomCode }` );
 
         this.trackCells = mapData ? decodeCells( mapData ) : DEFAULT_CELLS;
         this.world = initPhysics( this.trackCells );
@@ -136,6 +145,49 @@ export class RaceRoom extends Room {
 
         } );
 
+        this.onMessage( 'setMap', ( client, data ) => {
+
+            if ( client.sessionId !== this.hostSessionId ) return;
+            if ( this.state.phase !== 'waiting' ) return;
+
+            const MAX_MAP_SIZE = 8192;
+            if ( typeof data !== 'string' || data.length > MAX_MAP_SIZE ) return;
+
+            // Rebuild track and physics world with new map
+            this.state.mapData = data;
+            this.trackCells = data ? decodeCells( data ) : DEFAULT_CELLS;
+            this.world = initPhysics( this.trackCells );
+            this.finishLine = computeFinishLine( this.trackCells );
+            this.checkpoints = computeCheckpoints( this.trackCells );
+
+            // Recreate all vehicle bodies in new world and reset to new spawn positions
+            const spawnPoints = computeSpawnPositions( this.trackCells, this.sims.size );
+            let i = 0;
+            for ( const [ sessionId, sim ] of this.sims ) {
+
+                const spawn = spawnPoints[ i++ ];
+                sim.body = createSphereBody( this.world, spawn.position );
+                sim.spawnPos = [ ...spawn.position ];
+                sim.spawnAngle = spawn.angle;
+                sim.spherePos[ 0 ] = spawn.position[ 0 ];
+                sim.spherePos[ 1 ] = spawn.position[ 1 ];
+                sim.spherePos[ 2 ] = spawn.position[ 2 ];
+                sim.linearSpeed = 0;
+                sim.angularSpeed = 0;
+
+                const player = this.state.players.get( sessionId );
+                if ( player ) {
+
+                    player.x = spawn.position[ 0 ];
+                    player.y = spawn.position[ 1 ];
+                    player.z = spawn.position[ 2 ];
+
+                }
+
+            }
+
+        } );
+
         this.onMessage( 'restartRace', ( client ) => {
 
             if ( client.sessionId !== this.hostSessionId ) return;
@@ -198,13 +250,27 @@ export class RaceRoom extends Room {
 
         }
 
-        const color = COLORS[ this.colorIndex % COLORS.length ];
+        // Read identity from join options (set by client Network.connect)
+        const username = ( options && typeof options.username === 'string' )
+            ? options.username.slice( 0, 20 ) : '';
+        const requestedVehicle = ( options && VEHICLE_STATS[ options.vehicle ] )
+            ? options.vehicle : null;
+
+        // Use the requested vehicle color if not already taken, otherwise fallback to next free color
+        const usedColors = new Set();
+        for ( const [ , p ] of this.state.players ) usedColors.add( p.color );
+        const vehicleKey = ( requestedVehicle && ! usedColors.has( requestedVehicle ) )
+            ? requestedVehicle
+            : COLORS.find( ( c ) => ! usedColors.has( c ) ) || COLORS[ this.colorIndex % COLORS.length ];
         this.colorIndex++;
+
+        const color = vehicleKey;
+        const stats = VEHICLE_STATS[ vehicleKey ];
 
         const spawnPoints = computeSpawnPositions( this.trackCells, this.colorIndex );
         const spawn = spawnPoints[ spawnPoints.length - 1 ];
 
-        const sim = new VehicleSim( this.world, spawn.position, spawn.angle );
+        const sim = new VehicleSim( this.world, spawn.position, spawn.angle, stats );
         sim.body = createSphereBody( this.world, spawn.position );
         sim.spawnPos = [ ...spawn.position ];
         sim.spawnAngle = spawn.angle;
@@ -212,6 +278,8 @@ export class RaceRoom extends Room {
 
         const player = new PlayerState();
         player.color = color;
+        player.username = username;
+        player.vehicle = vehicleKey;
         player.x = spawn.position[ 0 ];
         player.y = spawn.position[ 1 ];
         player.z = spawn.position[ 2 ];
@@ -221,11 +289,14 @@ export class RaceRoom extends Room {
         player.qz = sim.quat[ 2 ];
         this.state.players.set( client.sessionId, player );
 
-        console.log( `Player ${ client.sessionId } joined as ${ color }` );
+        console.log( `Player ${ client.sessionId } (${ username || 'anonymous' }) joined as ${ color } ${ vehicleKey }` );
 
     }
 
     onLeave( client ) {
+
+        const sim = this.sims.get( client.sessionId );
+        if ( sim?.body ) rigidBody.remove( this.world, sim.body );
 
         this.sims.delete( client.sessionId );
         this.raceData.delete( client.sessionId );
@@ -474,14 +545,14 @@ export class RaceRoom extends Room {
                             // All finished?
                             if ( this.state.finishCount >= this.state.players.size ) {
 
-                                this.state.phase = 'finished';
+                                this._endRace();
 
                             } else if ( this.state.finishCount === 1 ) {
 
                                 // Start timeout for remaining players
                                 this.finishTimeout = this.clock.setTimeout( () => {
 
-                                    this.state.phase = 'finished';
+                                    this._endRace();
 
                                 }, FINISH_TIMEOUT_MS );
 
@@ -531,9 +602,75 @@ export class RaceRoom extends Room {
 
     }
 
+    // ─── End race ─────────────────────────────────────────────────────────────
+
+    _endRace() {
+
+        this.state.phase = 'finished';
+        const playersCount = this.state.players.size;
+
+        // Award XP & credits to every player asynchronously (don't block the room)
+        for ( const [ sessionId, player ] of this.state.players ) {
+
+            const rank = player.finished ? player.finishPosition : 0;
+            this._awardRaceResult( player.username, rank, playersCount ).catch( ( err ) => {
+
+                console.error( `[RaceRoom] award error for ${ player.username }:`, err.message );
+
+            } );
+
+        }
+
+    }
+
+    async _awardRaceResult( username, rank, playersCount ) {
+
+        if ( ! username ) return;
+
+        // Fetch player
+        const { rows } = await query(
+            `SELECT p.id, s.level, s.xp, s.xp_this_level, s.credits, s.races_played, s.wins
+             FROM players p
+             JOIN player_stats s ON s.player_id = p.id
+             WHERE p.username = $1`,
+            [ username ]
+        );
+
+        if ( rows.length === 0 ) return; // player not registered yet — skip
+
+        const s = rows[ 0 ];
+        const { xp: xpEarned, credits: creditsEarned } = computeRaceRewards( rank, playersCount );
+        const { level: newLevel, xp_this_level: newXpThisLevel } = computeLevel(
+            s.level, s.xp_this_level, xpEarned
+        );
+
+        await query(
+            `UPDATE player_stats SET
+                level         = $1,
+                xp            = xp + $2,
+                xp_this_level = $3,
+                credits       = credits + $4,
+                races_played  = races_played + 1,
+                wins          = wins + $5,
+                updated_at    = NOW()
+             WHERE player_id  = $6`,
+            [ newLevel, xpEarned, newXpThisLevel, creditsEarned, rank === 1 ? 1 : 0, s.id ]
+        );
+
+        await query(
+            `INSERT INTO race_results (player_id, rank, players_count, xp_earned, credits_earned)
+             VALUES ($1, $2, $3, $4, $5)`,
+            [ s.id, rank, playersCount, xpEarned, creditsEarned ]
+        );
+
+        console.log( `[RaceRoom] ${ username } awarded ${ xpEarned } XP / ${ creditsEarned } credits (rank ${ rank }/${ playersCount })` );
+
+    }
+
     onDispose() {
 
         if ( this.finishTimeout ) this.finishTimeout.clear();
+        unregisterRoomCode( this.roomId );
         console.log( 'RaceRoom disposed' );
 
     }

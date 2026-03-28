@@ -1,3 +1,5 @@
+import { gsap } from 'gsap';
+
 export class RaceHUD {
 
     constructor() {
@@ -33,27 +35,51 @@ export class RaceHUD {
         if ( n === this.lastCountdown ) return;
         this.lastCountdown = n;
 
-        if ( n > 0 ) {
+        gsap.killTweensOf( this.countdownEl );
 
-            this.countdownEl.textContent = n;
-            this.countdownEl.className = 'hud-countdown hud-countdown-active';
+        const isGo = n <= 0;
+        this.countdownEl.textContent = isGo ? 'GO!' : String( n );
+        this.countdownEl.className = 'hud-countdown hud-countdown-active';
 
-            // Trigger reflow for animation restart
-            void this.countdownEl.offsetWidth;
-            this.countdownEl.classList.add( 'hud-countdown-pop' );
+        if ( isGo ) {
+
+            // GO! — punch in then fade out
+            gsap.fromTo( this.countdownEl,
+                { scale: 0.4, opacity: 0 },
+                {
+                    scale:    1,
+                    opacity:  1,
+                    duration: 0.25,
+                    ease:     'back.out(2)',
+                    onComplete: () => {
+
+                        gsap.to( this.countdownEl, {
+                            scale:    1.15,
+                            opacity:  0,
+                            duration: 0.5,
+                            delay:    0.3,
+                            ease:     'power2.in',
+                            onComplete: () => {
+
+                                this.countdownEl.className = 'hud-countdown';
+                                this.countdownEl.textContent = '';
+                                this.lastCountdown = -1;
+                                gsap.set( this.countdownEl, { scale: 1, opacity: 1 } );
+
+                            },
+                        } );
+
+                    },
+                }
+            );
 
         } else {
 
-            this.countdownEl.textContent = 'GO!';
-            this.countdownEl.className = 'hud-countdown hud-countdown-active hud-countdown-pop';
-
-            setTimeout( () => {
-
-                this.countdownEl.className = 'hud-countdown';
-                this.countdownEl.textContent = '';
-                this.lastCountdown = -1;
-
-            }, 800 );
+            // Number — scale punch + subtle shake
+            gsap.fromTo( this.countdownEl,
+                { scale: 1.6, opacity: 0 },
+                { scale: 1, opacity: 1, duration: 0.3, ease: 'power3.out' }
+            );
 
         }
 
@@ -61,6 +87,8 @@ export class RaceHUD {
 
     hideCountdown() {
 
+        gsap.killTweensOf( this.countdownEl );
+        gsap.set( this.countdownEl, { scale: 1, opacity: 1 } );
         this.countdownEl.className = 'hud-countdown';
         this.countdownEl.textContent = '';
         this.lastCountdown = -1;
@@ -107,6 +135,7 @@ export class RaceHUD {
 
             entries.push( {
                 color: state.color,
+                username: state.username || '',
                 lap: state.currentLap || 0,
                 lapTime: state.lapTime || 0,
                 totalTime: state.totalTime || 0,
@@ -134,9 +163,10 @@ export class RaceHUD {
                 ? formatTime( e.totalTime )
                 : `Lap ${ Math.min( e.lap + 1, totalLaps ) }/${ totalLaps } — ${ formatTime( e.lapTime ) }`;
 
+            const label = escHtml( e.username || e.color );
             return `<div class="hud-lb-row">
                 <span class="hud-lb-pos">${ pos }</span>
-                <span class="hud-lb-color" style="--truck-color: ${ truckColor( e.color ) }">${ e.color }</span>
+                <span class="hud-lb-color" style="--truck-color: ${ truckColor( e.color ) }">${ label }</span>
                 <span class="hud-lb-status">${ status }</span>
             </div>`;
 
@@ -156,6 +186,7 @@ export class RaceHUD {
 
             entries.push( {
                 color: state.color,
+                username: state.username || '',
                 finishPosition: state.finishPosition || 0,
                 totalTime: state.totalTime || 0,
                 finished: state.finished,
@@ -176,9 +207,10 @@ export class RaceHUD {
             const pos = e.finished ? `#${ e.finishPosition }` : 'DNF';
             const time = e.finished ? formatTime( e.totalTime ) : '--';
 
+            const label = escHtml( e.username || ( e.color + ' truck' ) );
             return `<div class="hud-result-row">
                 <span class="hud-result-pos">${ pos }</span>
-                <span class="hud-result-color" style="--truck-color: ${ truckColor( e.color ) }">${ e.color } truck</span>
+                <span class="hud-result-color" style="--truck-color: ${ truckColor( e.color ) }">${ label }</span>
                 <span class="hud-result-time">${ time }</span>
             </div>`;
 
@@ -199,6 +231,10 @@ export class RaceHUD {
             </div>
         `;
         this.resultsEl.style.display = 'flex';
+        gsap.fromTo( this.resultsEl.querySelector( '.hud-results-panel' ),
+            { opacity: 0, y: 24, scale: 0.97 },
+            { opacity: 1, y: 0,  scale: 1, duration: 0.4, ease: 'power3.out' }
+        );
 
         if ( isHost && onPlayAgain ) {
 
@@ -246,6 +282,15 @@ function formatTime( ms ) {
     }
 
     return `${ sec }.${ String( centis ).padStart( 2, '0' ) }`;
+
+}
+
+function escHtml( str ) {
+
+    return String( str )
+        .replace( /&/g, '&amp;' )
+        .replace( /</g, '&lt;' )
+        .replace( />/g, '&gt;' );
 
 }
 

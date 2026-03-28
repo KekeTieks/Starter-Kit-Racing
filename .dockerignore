@@ -1,0 +1,5 @@
+server/node_modules
+_benchmark
+_godot
+.DS_Store
+.git

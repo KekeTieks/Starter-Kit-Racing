@@ -106,6 +106,7 @@
 <body>
 	<div id="toolbar">
 		<button id="btn-road" class="active">Road</button>
+		<button id="btn-checkpoint">Checkpoint</button>
 		<button id="btn-erase">Erase</button>
 		<div class="separator"></div>
 		<button id="btn-play" class="action">Play</button>
@@ -148,8 +149,12 @@
 
 	// ─── State ────────────────────────────────────────────────
 
-	const grid = new Map(); // "gx,gz" → { type, orient, isFinish, mesh }
-	let tool = 'road'; // 'road', 'erase'
+	const grid = new Map(); // "gx,gz" → { type, orient, isFinish, isCheckpoint, mesh, cpMarker }
+	let tool = 'road'; // 'road', 'checkpoint', 'erase'
+
+	// Checkpoint marker geometry (diamond shape)
+	const cpMarkerGeo = new THREE.OctahedronGeometry( 1.5, 0 );
+	const cpMarkerMat = new THREE.MeshBasicMaterial( { color: 0xff8800, wireframe: true } );
 
 	function cellKey( gx, gz ) { return gx + ',' + gz; }
 
@@ -577,7 +582,7 @@
 
 		}
 
-		grid.set( key, { type: 'track-straight', orient: 0, isFinish: false, mesh: null } );
+		grid.set( key, { type: 'track-straight', orient: 0, isFinish: false, isCheckpoint: false, mesh: null, cpMarker: null } );
 		resolveCellAndNeighbors( gx, gz );
 		save();
 
@@ -585,9 +590,43 @@
 
 	function placeFinish() {
 
-		const cell = { type: 'track-finish', orient: 0, isFinish: true, mesh: null };
+		const cell = { type: 'track-finish', orient: 0, isFinish: true, isCheckpoint: false, mesh: null, cpMarker: null };
 		grid.set( cellKey( 0, 0 ), cell );
 		placeMesh( 0, 0, cell );
+
+	}
+
+	function toggleCheckpoint( gx, gz ) {
+
+		const key = cellKey( gx, gz );
+		const cell = grid.get( key );
+		if ( ! cell ) return;
+		if ( cell.isFinish ) return; // can't checkpoint the finish line
+
+		cell.isCheckpoint = ! cell.isCheckpoint;
+
+		if ( cell.isCheckpoint ) {
+
+			// Add visual marker
+			const marker = new THREE.Mesh( cpMarkerGeo, cpMarkerMat );
+			marker.position.set( ( gx + 0.5 ) * CELL_RAW, 3.5, ( gz + 0.5 ) * CELL_RAW );
+			marker.scale.setScalar( 1 );
+			trackGroup.add( marker );
+			cell.cpMarker = marker;
+
+		} else {
+
+			// Remove marker
+			if ( cell.cpMarker ) {
+
+				trackGroup.remove( cell.cpMarker );
+				cell.cpMarker = null;
+
+			}
+
+		}
+
+		save();
 
 	}
 
@@ -596,11 +635,11 @@
 		const key = cellKey( gx, gz );
 		if ( ! grid.has( key ) ) return;
 
-		// Don't allow erasing the finish tile
 		const cell = grid.get( key );
 		if ( cell.isFinish ) return;
 
 		if ( cell.mesh ) trackGroup.remove( cell.mesh );
+		if ( cell.cpMarker ) trackGroup.remove( cell.cpMarker );
 		grid.delete( key );
 
 		// Re-resolve neighbors
@@ -618,6 +657,7 @@
 		for ( const [ , cell ] of grid ) {
 
 			if ( cell.mesh ) trackGroup.remove( cell.mesh );
+			if ( cell.cpMarker ) trackGroup.remove( cell.cpMarker );
 
 		}
 
@@ -799,12 +839,23 @@
 
 			const arr = decodeCells( encoded );
 
-			for ( const [ gx, gz, type, orient ] of arr ) {
+			for ( const entry of arr ) {
 
+				const [ gx, gz, type, orient ] = entry;
+				const isCheckpoint = entry[ 4 ] === true;
 				const isFinish = ( type === 'track-finish' );
-				const cell = { type, orient, isFinish, mesh: null };
+				const cell = { type, orient, isFinish, isCheckpoint, mesh: null, cpMarker: null };
 				grid.set( cellKey( gx, gz ), cell );
 				placeMesh( gx, gz, cell );
+
+				if ( isCheckpoint ) {
+
+					const marker = new THREE.Mesh( cpMarkerGeo, cpMarkerMat );
+					marker.position.set( ( gx + 0.5 ) * CELL_RAW, 3.5, ( gz + 0.5 ) * CELL_RAW );
+					trackGroup.add( marker );
+					cell.cpMarker = marker;
+
+				}
 
 			}
 
@@ -833,17 +884,20 @@
 	// ─── Toolbar ──────────────────────────────────────────────
 
 	const btnRoad = document.getElementById( 'btn-road' );
+	const btnCheckpoint = document.getElementById( 'btn-checkpoint' );
 	const btnErase = document.getElementById( 'btn-erase' );
 
 	function selectTool( t ) {
 
 		tool = t;
 		btnRoad.classList.toggle( 'active', t === 'road' );
+		btnCheckpoint.classList.toggle( 'active', t === 'checkpoint' );
 		btnErase.classList.toggle( 'active', t === 'erase' );
 
 	}
 
 	btnRoad.addEventListener( 'click', () => selectTool( 'road' ) );
+	btnCheckpoint.addEventListener( 'click', () => selectTool( 'checkpoint' ) );
 	btnErase.addEventListener( 'click', () => selectTool( 'erase' ) );
 
 	function getCellsArray() {
@@ -852,7 +906,9 @@
 		for ( const [ key, cell ] of grid ) {
 
 			const [ gx, gz ] = key.split( ',' ).map( Number );
-			arr.push( [ gx, gz, cell.type, cell.orient ] );
+			const entry = [ gx, gz, cell.type, cell.orient ];
+			if ( cell.isCheckpoint ) entry.push( true );
+			arr.push( entry );
 
 		}
 
@@ -939,7 +995,15 @@
 
 		} else if ( isDrawing ) {
 
-			placeRoad( cell.gx, cell.gz );
+			if ( tool === 'checkpoint' ) {
+
+				toggleCheckpoint( cell.gx, cell.gz );
+
+			} else {
+
+				placeRoad( cell.gx, cell.gz );
+
+			}
 
 		}
 
@@ -1166,6 +1230,10 @@
 			selectTool( 'road' );
 
 		} else if ( e.key === '2' ) {
+
+			selectTool( 'checkpoint' );
+
+		} else if ( e.key === '3' ) {
 
 			selectTool( 'erase' );
 

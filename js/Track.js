@@ -368,13 +368,14 @@ export function encodeCells( cells ) {
 
 	for ( let i = 0; i < cells.length; i ++ ) {
 
-		const [ gx, gz, name, godotOrient ] = cells[ i ];
+		const [ gx, gz, name, godotOrient, checkpoint ] = cells[ i ];
 		const ti = TYPE_INDEX[ name ] ?? 0;
 		const oi = GODOT_TO_ORIENT[ godotOrient ] ?? 0;
+		const cp = checkpoint ? 1 : 0;
 
 		bytes[ i * 3 ] = gx + 128;
 		bytes[ i * 3 + 1 ] = gz + 128;
-		bytes[ i * 3 + 2 ] = ( ti << 2 ) | oi;
+		bytes[ i * 3 + 2 ] = ( cp << 4 ) | ( ti << 2 ) | oi;
 
 	}
 
@@ -394,8 +395,11 @@ export function decodeCells( str ) {
 		const packed = bytes[ i + 2 ];
 		const ti = ( packed >> 2 ) & 0x03;
 		const oi = packed & 0x03;
+		const cp = ( packed >> 4 ) & 0x01;
 
-		cells.push( [ gx, gz, TYPE_NAMES[ ti ], ORIENT_TO_GODOT[ oi ] ] );
+		const cell = [ gx, gz, TYPE_NAMES[ ti ], ORIENT_TO_GODOT[ oi ] ];
+		if ( cp ) cell.push( true );
+		cells.push( cell );
 
 	}
 

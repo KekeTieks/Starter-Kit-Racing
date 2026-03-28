@@ -1,0 +1,15 @@
+{
+  "name": "racing-server",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "colyseus": "^0.17.8",
+    "@colyseus/schema": "^4.0.19",
+    "crashcat": "^0.0.2",
+    "express": "^5.1.0"
+  }
+}

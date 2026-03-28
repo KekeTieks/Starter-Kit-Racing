@@ -1,3 +1,7 @@
 _benchmark/
 _godot/
 .DS_Store
+
+# Server
+server/node_modules/
+server/package-lock.json

@@ -8,9 +8,9 @@ const _zAxis = new THREE.Vector3();
 const _newZ = new THREE.Vector3();
 const _mat4 = new THREE.Matrix4();
 const _quat = new THREE.Quaternion();
+const _currQ = new THREE.Quaternion();
 const _up = new THREE.Vector3( 0, 1, 0 );
 
-const SPEED_SCALE = 12.5;
 const LINEAR_DAMP = 0.1;
 
 function lerpAngle( a, b, t ) {
@@ -153,7 +153,14 @@ export class Vehicle {
 
 		}
 
-		this.linearSpeed *= Math.max( 0, 1 - LINEAR_DAMP * dt );
+		// LINEAR_DAMP is applied server-side in VehicleSim — skip it here
+		// to avoid double-damping in multiplayer client-side prediction.
+		// In single-player there is no server, so we apply it directly.
+		if ( ! this.physicsWorld || ! this.physicsWorld._isServerWorld ) {
+
+			this.linearSpeed *= Math.max( 0, 1 - LINEAR_DAMP * dt );
+
+		}
 
 		if ( this.rigidBody ) {
 
@@ -279,6 +286,77 @@ export class Vehicle {
 			this.wheelFR.rotation.y = lerpAngle( this.wheelFR.rotation.y, -this.inputX / 1.5, dt * 10 );
 
 		}
+
+	}
+
+	// Multiplayer frozen state: apply server position directly (countdown/finished)
+	updateFromServer( dt, serverState ) {
+
+		if ( ! serverState ) return;
+
+		this.spherePos.set( serverState.sx, serverState.sy, serverState.sz );
+		this.container.position.set( serverState.sx, serverState.sy - 0.5, serverState.sz );
+		this.container.quaternion.set( serverState.sqx, serverState.sqy, serverState.sqz, serverState.sqw );
+
+		this.linearSpeed = serverState.linearSpeed;
+		this.acceleration = serverState.acceleration;
+		this.driftIntensity = serverState.driftIntensity;
+		this.inputX = serverState.inputX;
+		this.inputZ = serverState.inputZ;
+
+		if ( dt > 0 ) {
+
+			this.modelVelocity.subVectors( this.container.position, this.prevModelPos ).divideScalar( dt );
+			this.prevModelPos.copy( this.container.position );
+
+		}
+
+		this.updateBody( dt );
+		this.updateWheels( dt );
+
+	}
+
+	// Soft reconciliation: nudge local prediction toward server authority
+	reconcileFromServer( serverState ) {
+
+		if ( ! serverState || ! this.rigidBody || ! this.physicsWorld ) return;
+
+		const RATE = 0.1;
+		const SNAP_THRESHOLD = 5.0;
+
+		const sx = serverState.sx;
+		const sy = serverState.sy;
+		const sz = serverState.sz;
+
+		const dx = sx - this.spherePos.x;
+		const dy = sy - this.spherePos.y;
+		const dz = sz - this.spherePos.z;
+		const error = Math.sqrt( dx * dx + dy * dy + dz * dz );
+
+		if ( error > SNAP_THRESHOLD ) {
+
+			// Hard snap for teleports / respawns
+			rigidBody.setPosition( this.physicsWorld, this.rigidBody, [ sx, sy, sz ], false );
+			rigidBody.setLinearVelocity( this.physicsWorld, this.rigidBody, [ 0, 0, 0 ] );
+			rigidBody.setAngularVelocity( this.physicsWorld, this.rigidBody, [ 0, 0, 0 ] );
+			this.spherePos.set( sx, sy, sz );
+
+		} else if ( error > 0.01 ) {
+
+			// Soft correction: nudge physics body toward server position
+			const cx = this.spherePos.x + dx * RATE;
+			const cy = this.spherePos.y + dy * RATE;
+			const cz = this.spherePos.z + dz * RATE;
+			rigidBody.setPosition( this.physicsWorld, this.rigidBody, [ cx, cy, cz ], false );
+
+		}
+
+		// Soft rotation correction
+		_currQ.set( serverState.sqx, serverState.sqy, serverState.sqz, serverState.sqw );
+		this.container.quaternion.slerp( _currQ, RATE );
+
+		// Nudge speed toward server
+		this.linearSpeed = this.linearSpeed + ( serverState.linearSpeed - this.linearSpeed ) * RATE;
 
 	}
 

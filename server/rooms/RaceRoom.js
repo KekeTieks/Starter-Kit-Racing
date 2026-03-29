@@ -5,7 +5,7 @@ import { initPhysics, createSphereBody, createChassisBody, initRayFilter } from 
 import { VehicleSim } from '../simulation/VehicleSim.js';
 import { VEHICLE_STATS, USE_ARCADE_VEHICLE } from '../simulation/VehicleStats.js';
 import {
-    DEFAULT_CELLS, decodeCells,
+    DEFAULT_CELLS,
     computeSpawnPositions, computeSpawnPosition,
     computeFinishLine, computeCheckpoints
 } from '../simulation/TrackData.js';
@@ -60,7 +60,7 @@ export class RaceRoom extends Room {
 
         this.state = new RaceState();
 
-        const MAX_MAP_SIZE = 8192; // base64url: ~2730 cells, well above any reasonable track
+        const MAX_MAP_SIZE = 500000; // JSON cells: generous limit for large tracks
         const rawMap = options.map || '';
         if ( typeof rawMap !== 'string' || rawMap.length > MAX_MAP_SIZE ) {
 
@@ -68,8 +68,7 @@ export class RaceRoom extends Room {
 
         }
 
-        const mapData = rawMap;
-        this.state.mapData = mapData;
+        this.state.mapData = rawMap;
         this.state.mode = 'sandbox';
         this.state.phase = 'waiting';
 
@@ -83,7 +82,7 @@ export class RaceRoom extends Room {
         this.state.weather = options.weather || WEATHER_OPTIONS[ Math.floor( Math.random() * WEATHER_OPTIONS.length ) ];
         console.log( `Room ${ this.roomId } weather: ${ this.state.weather }` );
 
-        this.trackCells = mapData ? decodeCells( mapData ) : DEFAULT_CELLS;
+        this.trackCells = rawMap ? JSON.parse( rawMap ) : DEFAULT_CELLS;
         this.world = initPhysics( this.trackCells );
         this._rayFilter = USE_ARCADE_VEHICLE ? initRayFilter( this.world ) : null;
         this.sims = new Map();
@@ -276,12 +275,12 @@ export class RaceRoom extends Room {
             if ( client.sessionId !== this.hostSessionId ) return;
             if ( this.state.phase !== 'waiting' ) return;
 
-            const MAX_MAP_SIZE = 8192;
+            const MAX_MAP_SIZE = 500000;
             if ( typeof data !== 'string' || data.length > MAX_MAP_SIZE ) return;
 
             // Rebuild track and physics world with new map
             this.state.mapData = data;
-            this.trackCells = data ? decodeCells( data ) : DEFAULT_CELLS;
+            this.trackCells = data ? JSON.parse( data ) : DEFAULT_CELLS;
             this.world = initPhysics( this.trackCells );
             this._rayFilter = USE_ARCADE_VEHICLE ? initRayFilter( this.world ) : null;
             this.finishLine = computeFinishLine( this.trackCells );

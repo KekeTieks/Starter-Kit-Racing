@@ -1,15 +1,8 @@
-// Track codec adapted from Track.js for Node.js (no Three.js / no btoa/atob)
+// Track data utilities for Node.js (no Three.js dependency)
 
 export const ORIENT_DEG = { 0: 0, 10: 180, 16: 90, 22: 270 };
 export const CELL_RAW = 9.99;
 export const GRID_SCALE = 0.75;
-
-const TYPE_NAMES = [ 'track-straight', 'track-corner', 'track-bump', 'track-finish' ];
-const TYPE_INDEX = {};
-for ( let i = 0; i < TYPE_NAMES.length; i++ ) TYPE_INDEX[ TYPE_NAMES[ i ] ] = i;
-
-const ORIENT_TO_GODOT = [ 0, 16, 10, 22 ];
-const GODOT_TO_ORIENT = { 0: 0, 16: 1, 10: 2, 22: 3 };
 
 export const DEFAULT_CELLS = [
     [ -3, -3, 'track-corner',   16 ],
@@ -29,30 +22,6 @@ export const DEFAULT_CELLS = [
     [ -1,  2, 'track-straight', 16 ],
     [  0,  2, 'track-corner',   22 ],
 ];
-
-export function decodeCells( str ) {
-
-    const bytes = Buffer.from( str.replace( /-/g, '+' ).replace( /_/g, '/' ), 'base64' );
-    const cells = [];
-
-    for ( let i = 0; i + 2 < bytes.length; i += 3 ) {
-
-        const gx = bytes[ i ] - 128;
-        const gz = bytes[ i + 1 ] - 128;
-        const packed = bytes[ i + 2 ];
-        const ti = ( packed >> 2 ) & 0x03;
-        const oi = packed & 0x03;
-        const cp = ( packed >> 4 ) & 0x01;
-
-        const cell = [ gx, gz, TYPE_NAMES[ ti ], ORIENT_TO_GODOT[ oi ] ];
-        if ( cp ) cell.push( true );
-        cells.push( cell );
-
-    }
-
-    return cells;
-
-}
 
 export function computeSpawnPosition( cells ) {
 

@@ -5,10 +5,11 @@ import express from 'express';
 import { RaceRoom } from './rooms/RaceRoom.js';
 import { resolveRoomCode } from './RoomCodeRegistry.js';
 import { migrate } from './db/migrate.js';
-import authRouter    from './routes/auth.js';
-import profileRouter from './routes/profile.js';
+import authRouter     from './routes/auth.js';
+import profileRouter  from './routes/profile.js';
 import upgradesRouter from './routes/upgrades.js';
 import cosmeticsRouter from './routes/cosmetics.js';
+import circuitsRouter from './routes/circuits.js';
 
 const __dirname = path.dirname( fileURLToPath( import.meta.url ) );
 const port = parseInt( process.env.PORT || '2567' );
@@ -33,10 +34,11 @@ const server = defineServer( {
         app.use( express.json() );
 
         // ── Auth ────────────────────────────────────────────────────────────
-        app.use( '/api/auth',     authRouter );
-        app.use( '/api/profile',  profileRouter );
-        app.use( '/api/upgrades', upgradesRouter );
+        app.use( '/api/auth',      authRouter );
+        app.use( '/api/profile',   profileRouter );
+        app.use( '/api/upgrades',  upgradesRouter );
         app.use( '/api/cosmetics', cosmeticsRouter );
+        app.use( '/api/circuits',  circuitsRouter );
 
         // ── Room code resolution ─────────────────────────────────────────────
         app.get( '/api/room-code/:code', ( req, res ) => {

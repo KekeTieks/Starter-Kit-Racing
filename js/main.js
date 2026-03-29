@@ -6,7 +6,7 @@ import { Vehicle } from './Vehicle.js';
 import { RemoteVehicle } from './RemoteVehicle.js';
 import { Camera } from './Camera.js';
 import { Controls } from './Controls.js';
-import { buildTrack, encodeCells, decodeCells, computeSpawnPosition, computeTrackBounds } from './Track.js';
+import { buildTrack, decodeCells, computeSpawnPosition, computeTrackBounds } from './Track.js';
 import { buildWallColliders, createSphereBody, createChassisBody, createKinematicSphereBody, initRayFilter } from './Physics.js';
 import { SmokeTrails, NitroFX } from './Particles.js';
 import { Skidmarks } from './Skidmarks.js';
@@ -965,12 +965,37 @@ async function init() {
 	await loadModels();
 
 	const params = new URLSearchParams( window.location.search );
-	const mapParam = params.get( 'map' );
-	const roomParam = params.get( 'room' );
+	const mapParam     = params.get( 'map' );
+	const circuitParam = params.get( 'circuit' );
+	const roomParam    = params.get( 'room' );
 
-	// URL ?map= fallback (from editor share link)
+	// URL ?map= fallback (from editor share link, legacy base64)
+	// URL ?circuit= — fetch cells from server by short ID
 	let urlCells = null;
-	if ( mapParam ) {
+
+	if ( circuitParam ) {
+
+		try {
+
+			const res = await fetch( '/api/circuits/' + circuitParam );
+			if ( res.ok ) {
+
+				const data = await res.json();
+				urlCells = data.cells;
+
+			} else {
+
+				console.warn( 'Circuit not found:', circuitParam );
+
+			}
+
+		} catch ( e ) {
+
+			console.warn( 'Failed to fetch circuit:', e );
+
+		}
+
+	} else if ( mapParam ) {
 
 		try {
 
@@ -994,11 +1019,11 @@ async function init() {
 		if ( lobbyCells ) return lobbyCells;
 		if ( urlCells ) return urlCells;
 
-		// Guest joining via ?room= link: decode track from server state
+		// Guest joining via ?room= link: parse track from server state (JSON)
 		const serverMap = network.roomMapData;
 		if ( serverMap ) {
 
-			try { return decodeCells( serverMap ); } catch ( _e ) { /* ignore */ }
+			try { return JSON.parse( serverMap ); } catch ( _e ) { /* ignore */ }
 
 		}
 
@@ -1006,12 +1031,13 @@ async function init() {
 
 	}
 
-	// Encode the active circuit for the server. Priority: lobby selection → URL ?map= → ''
+	// Serialize the active circuit as JSON for the server. Priority: lobby selection → URL cells → ''
 	function getMapParam() {
 
 		const cells = lobby.getSelectedCells();
-		if ( cells ) return encodeCells( cells );
-		return mapParam || '';
+		if ( cells ) return JSON.stringify( cells );
+		if ( urlCells ) return JSON.stringify( urlCells );
+		return '';
 
 	}
 
@@ -1112,7 +1138,7 @@ async function init() {
 		// Host: send new map to server when circuit changes
 		lobby.onCircuitChange = ( cells ) => {
 
-			network.sendSetMap( encodeCells( cells ) );
+			network.sendSetMap( JSON.stringify( cells ) );
 
 		};
 
@@ -1122,7 +1148,7 @@ async function init() {
 			if ( ! mapData ) return;
 			try {
 
-				const cells = decodeCells( mapData );
+				const cells = JSON.parse( mapData );
 				lobby.updateCircuit( cells, null );
 
 			} catch ( _e ) { /* ignore invalid map */ }

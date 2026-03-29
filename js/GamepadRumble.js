@@ -81,13 +81,13 @@ export class GamepadRumble {
 		let weak = 0, strong = 0;
 
 		// Drift: light rumble on both motors
-		if ( this._drift > 0.15 ) {
+		/**if ( this._drift > 0.15 ) {
 
 			const d = Math.min( this._drift, 1 );
 			weak   += d * 0.15;
 			strong += d * 0.08;
 
-		}
+		}*/
 
 		// Nitro hold: steady vibration
 		if ( this._nitro ) {

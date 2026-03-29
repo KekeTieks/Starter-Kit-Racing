@@ -83,6 +83,13 @@ const MIGRATIONS = [
 
     `CREATE INDEX IF NOT EXISTS idx_owned_cosmetics_player ON owned_cosmetics(player_id)`,
 
+    // ── 005: shared circuits ──────────────────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS circuits (
+        id         VARCHAR(8) PRIMARY KEY,
+        cells      JSONB      NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
 ];
 
 export async function migrate() {

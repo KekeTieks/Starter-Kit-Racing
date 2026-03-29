@@ -64,6 +64,11 @@
 			background: rgba(80, 180, 80, 0.4);
 			color: #fff;
 		}
+		#toolbar button.action:disabled {
+			background: rgba(80, 180, 80, 0.1);
+			color: rgba(140, 255, 140, 0.35);
+			cursor: default;
+		}
 
 		#toolbar button.danger {
 			color: rgba(255, 255, 255, 0.45);
@@ -93,6 +98,157 @@
 		}
 		#toast.show { opacity: 1; }
 
+		/* ── Modales ─────────────────────────────── */
+		.modal-overlay {
+			position: fixed;
+			inset: 0;
+			background: rgba(0, 0, 0, 0.6);
+			display: none;
+			align-items: center;
+			justify-content: center;
+			z-index: 100;
+		}
+		.modal-overlay.open { display: flex; }
+
+		.modal-box {
+			background: rgba(20, 20, 30, 0.97);
+			border: 1px solid rgba(255, 255, 255, 0.12);
+			border-radius: 16px;
+			padding: 24px 28px;
+			min-width: 320px;
+			max-width: 90vw;
+			box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
+			display: flex;
+			flex-direction: column;
+			gap: 16px;
+		}
+		.modal-box h3 {
+			margin: 0;
+			color: #fff;
+			font-size: 16px;
+			font-weight: 600;
+		}
+		.modal-box input[type="text"] {
+			width: 100%;
+			padding: 10px 14px;
+			background: rgba(255, 255, 255, 0.07);
+			border: 1px solid rgba(255, 255, 255, 0.15);
+			border-radius: 8px;
+			color: #fff;
+			font-size: 14px;
+			outline: none;
+			font-family: inherit;
+		}
+		.modal-box input[type="text"]:focus {
+			border-color: rgba(255, 255, 255, 0.35);
+		}
+		.modal-actions {
+			display: flex;
+			gap: 8px;
+			justify-content: flex-end;
+		}
+		.modal-actions button {
+			padding: 8px 18px;
+			border: none;
+			border-radius: 8px;
+			font-size: 13px;
+			font-weight: 500;
+			cursor: pointer;
+			font-family: inherit;
+			transition: all 0.15s;
+		}
+		.modal-actions .btn-primary {
+			background: rgba(80, 180, 80, 0.3);
+			color: rgba(140, 255, 140, 0.95);
+		}
+		.modal-actions .btn-primary:hover {
+			background: rgba(80, 180, 80, 0.5);
+			color: #fff;
+		}
+		.modal-actions .btn-secondary {
+			background: rgba(255, 255, 255, 0.08);
+			color: rgba(255, 255, 255, 0.6);
+		}
+		.modal-actions .btn-secondary:hover {
+			background: rgba(255, 255, 255, 0.15);
+			color: #fff;
+		}
+
+		/* ── Modal Load Library ──────────────────── */
+		#modal-load .modal-box {
+			min-width: 380px;
+			max-height: 80vh;
+		}
+		#modal-load-list {
+			display: flex;
+			flex-direction: column;
+			gap: 8px;
+			overflow-y: auto;
+			max-height: 50vh;
+			padding-right: 4px;
+		}
+		#modal-load-list::-webkit-scrollbar { width: 4px; }
+		#modal-load-list::-webkit-scrollbar-track { background: transparent; }
+		#modal-load-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
+
+		.library-item {
+			display: flex;
+			align-items: center;
+			gap: 14px;
+			padding: 10px 12px;
+			border-radius: 10px;
+			border: 1px solid rgba(255, 255, 255, 0.07);
+			cursor: pointer;
+			transition: all 0.15s;
+		}
+		.library-item:hover {
+			background: rgba(255, 255, 255, 0.07);
+			border-color: rgba(255, 255, 255, 0.15);
+		}
+		.library-item svg {
+			flex-shrink: 0;
+			border-radius: 4px;
+			background: rgba(0,0,0,0.3);
+		}
+		.library-item .lib-info { flex: 1; min-width: 0; }
+		.library-item .lib-name {
+			color: #fff;
+			font-size: 14px;
+			font-weight: 500;
+			white-space: nowrap;
+			overflow: hidden;
+			text-overflow: ellipsis;
+		}
+		.library-item .lib-tag {
+			color: rgba(255,255,255,0.35);
+			font-size: 11px;
+			margin-top: 2px;
+		}
+		.library-item .lib-delete {
+			padding: 4px 8px;
+			border: none;
+			border-radius: 6px;
+			background: transparent;
+			color: rgba(255,255,255,0.3);
+			font-size: 12px;
+			cursor: pointer;
+			transition: all 0.15s;
+			flex-shrink: 0;
+		}
+		.library-item .lib-delete:hover {
+			background: rgba(220, 80, 80, 0.25);
+			color: rgba(255, 140, 140, 0.9);
+		}
+		.library-empty {
+			color: rgba(255,255,255,0.35);
+			font-size: 13px;
+			text-align: center;
+			padding: 20px 0;
+		}
+		.modal-load-footer {
+			display: flex;
+			justify-content: flex-end;
+		}
 	</style>
 	<script type="importmap">
 	{
@@ -104,1195 +260,99 @@
 	</script>
 </head>
 <body>
+	<!-- Ramp config panel -->
+	<div id="ramp-panel" style="
+		display: none;
+		position: absolute;
+		bottom: 70px;
+		left: 50%;
+		transform: translateX(-50%);
+		background: rgba(20, 20, 30, 0.92);
+		backdrop-filter: blur(12px);
+		-webkit-backdrop-filter: blur(12px);
+		border: 1px solid rgba(255,255,255,0.1);
+		border-radius: 12px;
+		padding: 12px 16px;
+		z-index: 10;
+		display: none;
+		gap: 14px;
+		align-items: center;
+		flex-wrap: wrap;
+		min-width: 340px;
+	">
+		<label style="color:rgba(255,255,255,0.7);font-size:12px;display:flex;flex-direction:column;gap:4px;">
+			Longueur
+			<div style="display:flex;align-items:center;gap:6px;">
+				<input type="range" id="ramp-length" min="2" max="18" step="1" value="6" style="width:90px;">
+				<span id="ramp-length-val" style="color:#fff;font-size:12px;min-width:28px;">0.6</span>
+			</div>
+		</label>
+		<label style="color:rgba(255,255,255,0.7);font-size:12px;display:flex;flex-direction:column;gap:4px;">
+			Angle
+			<div style="display:flex;align-items:center;gap:6px;">
+				<input type="range" id="ramp-angle" min="5" max="35" step="1" value="15" style="width:90px;">
+				<span id="ramp-angle-val" style="color:#fff;font-size:12px;min-width:28px;">15°</span>
+			</div>
+		</label>
+		<label style="color:rgba(255,255,255,0.7);font-size:12px;display:flex;flex-direction:column;gap:4px;">
+			Largeur
+			<div style="display:flex;align-items:center;gap:6px;">
+				<input type="range" id="ramp-width" min="2" max="10" step="1" value="10" style="width:90px;">
+				<span id="ramp-width-val" style="color:#fff;font-size:12px;min-width:28px;">100%</span>
+			</div>
+		</label>
+	</div>
+
 	<div id="toolbar">
 		<button id="btn-road" class="active">Road</button>
+		<button id="btn-bump">Bump</button>
+		<button id="btn-ramp">Ramp</button>
 		<button id="btn-checkpoint">Checkpoint</button>
 		<button id="btn-erase">Erase</button>
 		<div class="separator"></div>
+		<button id="btn-undo" class="action" disabled>Undo</button>
+		<button id="btn-redo" class="action" disabled>Redo</button>
+		<div class="separator"></div>
 		<button id="btn-play" class="action">Play</button>
 		<button id="btn-share" class="action">Share</button>
-		<button id="btn-save-library" class="action">Save to Library</button>
+		<button id="btn-load-library" class="action">Load</button>
+		<button id="btn-save-library" class="action">Save</button>
 		<div class="separator"></div>
 		<button id="btn-clear" class="danger">Clear</button>
 	</div>
 
 	<div id="toast"></div>
 
+	<!-- Modal Save to Library -->
+	<div id="modal-save" class="modal-overlay">
+		<div class="modal-box">
+			<h3 id="modal-save-title">Sauvegarder le circuit</h3>
+			<div id="modal-save-update-row" style="display:none; padding:10px 14px; background:rgba(80,180,80,0.1); border:1px solid rgba(80,180,80,0.25); border-radius:8px; font-size:13px; color:rgba(140,255,140,0.85);">
+				Mettre à jour <strong id="modal-save-current-name"></strong>
+			</div>
+			<input type="text" id="modal-save-name" placeholder="Nom du circuit" maxlength="40">
+			<div class="modal-actions">
+				<button class="btn-secondary" id="modal-save-cancel">Annuler</button>
+				<button class="btn-secondary" id="modal-save-as-new" style="display:none;">Nouveau circuit</button>
+				<button class="btn-primary" id="modal-save-confirm">Sauvegarder</button>
+			</div>
+		</div>
+	</div>
+
+	<!-- Modal Load from Library -->
+	<div id="modal-load" class="modal-overlay">
+		<div class="modal-box">
+			<h3>Bibliothèque de circuits</h3>
+			<div id="modal-load-list"></div>
+			<div class="modal-load-footer">
+				<button class="btn-secondary" id="modal-load-cancel" style="padding:8px 18px;border:none;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;font-family:inherit;background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.6);">Fermer</button>
+			</div>
+		</div>
+	</div>
+
 	<script type="module">
-	import * as THREE from 'three';
-	import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-	import { ORIENT_DEG, CELL_RAW, GRID_SCALE, encodeCells, decodeCells } from './js/Track.js';
-	import { saveCircuit } from './js/CircuitLibrary.js';
-
-	// ─── Auto-tile lookup ─────────────────────────────────────
-	// Bitmask: N=8 S=4 E=2 W=1
-	// Corner connectivity: 0°=S+W, 90°=S+E, 180°=N+E, 270°=N+W
-
-	const ORIENT_FLIP = { 0: 10, 10: 0, 16: 22, 22: 16 };
-
-	const AUTOTILE = [
-		[ 'track-straight', 0 ],    //  0: isolated
-		[ 'track-straight', 16 ],   //  1: W
-		[ 'track-straight', 16 ],   //  2: E
-		[ 'track-straight', 16 ],   //  3: E+W
-		[ 'track-straight', 0 ],    //  4: S
-		[ 'track-corner',   0 ],    //  5: S+W
-		[ 'track-corner',   16 ],   //  6: S+E
-		[ 'track-straight', 16 ],   //  7: S+E+W
-		[ 'track-straight', 0 ],    //  8: N
-		[ 'track-corner',   22 ],   //  9: N+W
-		[ 'track-corner',   10 ],   // 10: N+E
-		[ 'track-straight', 16 ],   // 11: N+E+W
-		[ 'track-straight', 0 ],    // 12: N+S
-		[ 'track-straight', 0 ],    // 13: N+S+W
-		[ 'track-straight', 0 ],    // 14: N+S+E
-		[ 'track-straight', 0 ],    // 15: N+S+E+W
-	];
-
-	// ─── State ────────────────────────────────────────────────
-
-	const grid = new Map(); // "gx,gz" → { type, orient, isFinish, isCheckpoint, mesh, cpMarker }
-	let tool = 'road'; // 'road', 'checkpoint', 'erase'
-
-	// Checkpoint marker geometry (diamond shape)
-	const cpMarkerGeo = new THREE.OctahedronGeometry( 1.5, 0 );
-	const cpMarkerMat = new THREE.MeshBasicMaterial( { color: 0xff8800, wireframe: true } );
-
-	function cellKey( gx, gz ) { return gx + ',' + gz; }
-
-	// ─── Renderer ─────────────────────────────────────────────
-
-	const renderer = new THREE.WebGLRenderer( { antialias: true } );
-	renderer.setSize( window.innerWidth, window.innerHeight );
-	renderer.setPixelRatio( window.devicePixelRatio );
-	renderer.shadowMap.enabled = true;
-	renderer.toneMapping = THREE.ACESFilmicToneMapping;
-	renderer.toneMappingExposure = 1.0;
-	document.body.appendChild( renderer.domElement );
-
-	// ─── Scene ────────────────────────────────────────────────
-
-	const scene = new THREE.Scene();
-	scene.background = new THREE.Color( 0xadb2ba );
-	scene.fog = new THREE.Fog( 0xadb2ba, 80, 160 );
-
-	const dirLight = new THREE.DirectionalLight( 0xffffff, 5 );
-	dirLight.position.set( 11.4, 15, - 5.3 );
-	dirLight.castShadow = true;
-	dirLight.shadow.mapSize.setScalar( 4096 );
-	dirLight.shadow.camera.near = 0.5;
-	dirLight.shadow.camera.far = 100;
-	dirLight.shadow.camera.left = - 60;
-	dirLight.shadow.camera.right = 60;
-	dirLight.shadow.camera.top = 60;
-	dirLight.shadow.camera.bottom = - 60;
-	scene.add( dirLight );
-
-	const hemiLight = new THREE.HemisphereLight( 0xc8d8e8, 0x7a8a5a, 1.5 );
-	scene.add( hemiLight );
-
-	// Ground
-	const groundMat = new THREE.MeshStandardMaterial( { color: 0x369069, metalness: 0 } );
-	const ground = new THREE.Mesh( new THREE.PlaneGeometry( 200, 200 ), groundMat );
-	ground.rotation.x = - Math.PI / 2;
-	ground.position.y = - 0.14;
-	ground.receiveShadow = true;
-	scene.add( ground );
-
-	// Grid helper
-	const gridSize = 30;
-	const cellWorld = CELL_RAW * GRID_SCALE;
-	const gridHelper = new THREE.GridHelper( gridSize * cellWorld, gridSize, 0x4a7a2a, 0x4a7a2a );
-	gridHelper.position.y = - 0.49;
-	gridHelper.material.opacity = 0.3;
-	gridHelper.material.transparent = true;
-	scene.add( gridHelper );
-
-	// Track group (mirrors game structure)
-	const trackGroup = new THREE.Group();
-	trackGroup.position.y = - 0.5;
-	trackGroup.scale.setScalar( GRID_SCALE );
-	scene.add( trackGroup );
-
-	// Ghost preview group
-	const ghostGroup = new THREE.Group();
-	ghostGroup.position.y = - 0.5;
-	ghostGroup.scale.setScalar( GRID_SCALE );
-	scene.add( ghostGroup );
-	let ghostMesh = null;
-
-	// ─── Camera (orthographic, top-down) ──────────────────────
-
-	const frustum = 30;
-	const aspect = window.innerWidth / window.innerHeight;
-	const camera = new THREE.OrthographicCamera(
-		- frustum * aspect, frustum * aspect,
-		frustum, - frustum,
-		0.1, 200
-	);
-	const cellCenter = 0.5 * CELL_RAW * GRID_SCALE;
-	camera.position.set( cellCenter, 50, cellCenter );
-	camera.lookAt( cellCenter, 0, cellCenter );
-
-	const camTarget = new THREE.Vector3( cellCenter, 0, cellCenter );
-
-	window.addEventListener( 'resize', () => {
-
-		const a = window.innerWidth / window.innerHeight;
-		camera.left = - frustum * a;
-		camera.right = frustum * a;
-		camera.updateProjectionMatrix();
-		renderer.setSize( window.innerWidth, window.innerHeight );
-
-	} );
-
-	// ─── Load models ──────────────────────────────────────────
-
-	const loader = new GLTFLoader();
-	const modelNames = [ 'track-straight', 'track-corner', 'track-bump', 'track-finish' ];
-	const models = {};
-
-	async function loadModels() {
-
-		const promises = modelNames.map( ( name ) =>
-			new Promise( ( resolve, reject ) => {
-
-				loader.load( `models/${ name }.glb`, ( gltf ) => {
-
-					gltf.scene.traverse( ( child ) => {
-
-						if ( child.isMesh ) child.material.side = THREE.FrontSide;
-
-					} );
-
-					models[ name ] = gltf.scene;
-					resolve();
-
-				}, undefined, reject );
-
-			} )
-		);
-
-		await Promise.all( promises );
-
-	}
-
-	// ─── Auto-tile resolve ────────────────────────────────────
-
-	// Exit bitmask for each piece type/orient
-	// Bits: N=8 S=4 E=2 W=1
-	function getCellExits( cell ) {
-
-		const t = cell.type;
-		const o = cell.orient;
-
-		if ( t === 'track-corner' ) {
-
-			if ( o === 0 ) return 5;    // S+W
-			if ( o === 16 ) return 6;   // S+E
-			if ( o === 10 ) return 10;  // N+E
-			if ( o === 22 ) return 9;   // N+W
-
-		}
-
-		// Straight, finish, bump — all symmetric
-		if ( o === 0 || o === 10 ) return 12; // N+S
-		return 3; // E+W
-
-	}
-
-	// Check which neighbors have a road exit facing toward this cell
-	function getConnectivityMask( gx, gz ) {
-
-		let mask = 0;
-
-		// N neighbor has S exit?
-		const n = grid.get( cellKey( gx, gz - 1 ) );
-		if ( n && ( getCellExits( n ) & 4 ) ) mask |= 8;
-
-		// S neighbor has N exit?
-		const s = grid.get( cellKey( gx, gz + 1 ) );
-		if ( s && ( getCellExits( s ) & 8 ) ) mask |= 4;
-
-		// E neighbor has W exit?
-		const e = grid.get( cellKey( gx + 1, gz ) );
-		if ( e && ( getCellExits( e ) & 1 ) ) mask |= 2;
-
-		// W neighbor has E exit?
-		const w = grid.get( cellKey( gx - 1, gz ) );
-		if ( w && ( getCellExits( w ) & 2 ) ) mask |= 1;
-
-		return mask;
-
-	}
-
-	// Raw presence mask (any road in adjacent cell)
-	function getPresenceMask( gx, gz ) {
-
-		let mask = 0;
-		if ( grid.has( cellKey( gx, gz - 1 ) ) ) mask |= 8;
-		if ( grid.has( cellKey( gx, gz + 1 ) ) ) mask |= 4;
-		if ( grid.has( cellKey( gx + 1, gz ) ) ) mask |= 2;
-		if ( grid.has( cellKey( gx - 1, gz ) ) ) mask |= 1;
-		return mask;
-
-	}
-
-	// Count bits in a 4-bit mask
-	function bitCount( mask ) {
-
-		return ( mask >> 3 & 1 ) + ( mask >> 2 & 1 ) + ( mask >> 1 & 1 ) + ( mask & 1 );
-
-	}
-
-	// Count how many of a cell's exits are connected to neighbors
-	function connectedExitCount( gx, gz ) {
-
-		const cell = grid.get( cellKey( gx, gz ) );
-		if ( ! cell ) return 0;
-		return bitCount( getCellExits( cell ) & getConnectivityMask( gx, gz ) );
-
-	}
-
-	// When a new cell has 3+ neighbors, pick the best pair to connect.
-	// Prefer corners over straights, then prefer neighbors with more existing connections.
-	const DIR_INFO = [
-		{ bit: 8, dx: 0, dz: - 1 }, // N
-		{ bit: 4, dx: 0, dz: 1 },   // S
-		{ bit: 2, dx: 1, dz: 0 },   // E
-		{ bit: 1, dx: - 1, dz: 0 }, // W
-	];
-
-	function pickBestPair( mask, gx, gz ) {
-
-		const active = DIR_INFO.filter( d => mask & d.bit );
-		if ( active.length <= 2 ) return mask;
-
-		let bestMask = active[ 0 ].bit | active[ 1 ].bit;
-		let bestScore = - 1;
-		let bestIsCorner = false;
-
-		for ( let i = 0; i < active.length; i ++ ) {
-
-			for ( let j = i + 1; j < active.length; j ++ ) {
-
-				const pairMask = active[ i ].bit | active[ j ].bit;
-				const isCorner = ( pairMask !== 3 && pairMask !== 12 ); // not E+W or N+S
-
-				const s1 = connectedExitCount( gx + active[ i ].dx, gz + active[ i ].dz );
-				const s2 = connectedExitCount( gx + active[ j ].dx, gz + active[ j ].dz );
-				const score = s1 + s2;
-
-				if ( ( isCorner && ! bestIsCorner ) ||
-					( isCorner === bestIsCorner && score > bestScore ) ) {
-
-					bestMask = pairMask;
-					bestScore = score;
-					bestIsCorner = isCorner;
-
-				}
-
-			}
-
-		}
-
-		return bestMask;
-
-	}
-
-	// Only count neighbors that can actually connect:
-	// either they already exit toward us, or they have a free (unconnected) exit
-	function getAvailableMask( gx, gz ) {
-
-		let mask = 0;
-		const dirs = [
-			[ 0, - 1, 8, 4 ], // N neighbor, sets N bit, check if neighbor has S exit
-			[ 0, 1, 4, 8 ],   // S neighbor, sets S bit, check if neighbor has N exit
-			[ 1, 0, 2, 1 ],   // E neighbor, sets E bit, check if neighbor has W exit
-			[ - 1, 0, 1, 2 ], // W neighbor, sets W bit, check if neighbor has E exit
-		];
-
-		for ( const [ dx, dz, bit, oppBit ] of dirs ) {
-
-			const neighbor = grid.get( cellKey( gx + dx, gz + dz ) );
-			if ( ! neighbor ) continue;
-
-			const exits = getCellExits( neighbor );
-
-			// Already has an exit facing us
-			if ( exits & oppBit ) { mask |= bit; continue; }
-
-			// Has a free (unconnected) exit — could change to face us
-			const conn = getConnectivityMask( gx + dx, gz + dz );
-			if ( bitCount( exits & conn ) < 2 ) mask |= bit;
-
-		}
-
-		return mask;
-
-	}
-
-	// Resolve tile for new cells: use available neighbors, pick best pair if 3+
-	function resolveNewTile( gx, gz ) {
-
-		const pMask = getAvailableMask( gx, gz );
-
-		if ( bitCount( pMask ) >= 3 ) {
-
-			return AUTOTILE[ pickBestPair( pMask, gx, gz ) ];
-
-		}
-
-		return AUTOTILE[ pMask ];
-
-	}
-
-	function resolveTile( gx, gz ) {
-
-		const cMask = getConnectivityMask( gx, gz );
-
-		// If any neighbor connects toward us, use connectivity-based auto-tile
-		if ( cMask !== 0 ) return AUTOTILE[ cMask ];
-
-		// No neighbor connects toward us — orient parallel to nearest road
-		const pMask = getPresenceMask( gx, gz );
-		if ( pMask !== 0 ) {
-
-			// Find any adjacent road cell and match its direction
-			const dirs = [ [ 0, - 1, 8 ], [ 0, 1, 4 ], [ 1, 0, 2 ], [ - 1, 0, 1 ] ];
-			for ( const [ dx, dz, bit ] of dirs ) {
-
-				if ( ! ( pMask & bit ) ) continue;
-				const neighbor = grid.get( cellKey( gx + dx, gz + dz ) );
-				if ( ! neighbor ) continue;
-
-				const exits = getCellExits( neighbor );
-				// Match the neighbor's running direction
-				if ( exits & 12 ) return [ 'track-straight', 0 ];  // neighbor runs N-S
-				if ( exits & 3 ) return [ 'track-straight', 16 ];  // neighbor runs E-W
-
-			}
-
-		}
-
-		return AUTOTILE[ 0 ]; // isolated default
-
-	}
-
-	function placeMesh( gx, gz, cell ) {
-
-		if ( cell.mesh ) trackGroup.remove( cell.mesh );
-
-		const src = models[ cell.type ];
-		if ( ! src ) return;
-
-		const mesh = src.clone();
-		mesh.position.set( ( gx + 0.5 ) * CELL_RAW, 0.5, ( gz + 0.5 ) * CELL_RAW );
-		mesh.rotation.y = THREE.MathUtils.degToRad( ORIENT_DEG[ cell.orient ] || 0 );
-		mesh.traverse( ( c ) => {
-
-			if ( c.isMesh ) {
-
-				c.castShadow = true;
-				c.receiveShadow = true;
-
-			}
-
-		} );
-
-		trackGroup.add( mesh );
-		cell.mesh = mesh;
-
-	}
-
-	function resolveCell( gx, gz ) {
-
-		const key = cellKey( gx, gz );
-		const cell = grid.get( key );
-		if ( ! cell ) return;
-
-		let baseType, orient;
-
-		if ( ! cell.mesh ) {
-
-			// New cell: connect to neighbors, pick best pair if 3+
-			[ baseType, orient ] = resolveNewTile( gx, gz );
-
-		} else {
-
-			// Existing cell: re-resolve, but don't break existing connections
-			const cMask = getConnectivityMask( gx, gz );
-			const currentExits = getCellExits( cell );
-			const currentConnected = currentExits & cMask;
-
-			[ baseType, orient ] = resolveTile( gx, gz );
-
-			// Check if the proposed shape keeps all current connections
-			const proposedExits = getCellExits( { type: baseType, orient } );
-			if ( ( proposedExits & currentConnected ) !== currentConnected ) {
-
-				// Would disconnect something — keep current shape
-				return;
-
-			}
-
-		}
-
-		// Finish cells use track-finish but only when resolved as straight
-		const type = ( cell.isFinish && baseType === 'track-straight' ) ? 'track-finish' : baseType;
-
-		// Skip if nothing changed and mesh already exists
-		if ( cell.type === type && cell.orient === orient && cell.mesh ) return;
-
-		cell.type = type;
-		cell.orient = orient;
-
-		placeMesh( gx, gz, cell );
-
-	}
-
-	function resolveCellAndNeighbors( gx, gz ) {
-
-		resolveCell( gx, gz );
-		resolveCell( gx, gz - 1 );
-		resolveCell( gx, gz + 1 );
-		resolveCell( gx + 1, gz );
-		resolveCell( gx - 1, gz );
-
-	}
-
-	// ─── Cell operations ──────────────────────────────────────
-
-	function placeRoad( gx, gz ) {
-
-		const key = cellKey( gx, gz );
-
-		if ( grid.has( key ) ) {
-
-			const cell = grid.get( key );
-
-			// Click on finish tile → flip direction (rotate 180°)
-			if ( cell.isFinish ) {
-
-				cell.orient = ORIENT_FLIP[ cell.orient ] ?? cell.orient;
-				placeMesh( gx, gz, cell );
-				save();
-
-			}
-
-			return;
-
-		}
-
-		grid.set( key, { type: 'track-straight', orient: 0, isFinish: false, isCheckpoint: false, mesh: null, cpMarker: null } );
-		resolveCellAndNeighbors( gx, gz );
-		save();
-
-	}
-
-	function placeFinish() {
-
-		const cell = { type: 'track-finish', orient: 0, isFinish: true, isCheckpoint: false, mesh: null, cpMarker: null };
-		grid.set( cellKey( 0, 0 ), cell );
-		placeMesh( 0, 0, cell );
-
-	}
-
-	function toggleCheckpoint( gx, gz ) {
-
-		const key = cellKey( gx, gz );
-		const cell = grid.get( key );
-		if ( ! cell ) return;
-		if ( cell.isFinish ) return; // can't checkpoint the finish line
-
-		cell.isCheckpoint = ! cell.isCheckpoint;
-
-		if ( cell.isCheckpoint ) {
-
-			// Add visual marker
-			const marker = new THREE.Mesh( cpMarkerGeo, cpMarkerMat );
-			marker.position.set( ( gx + 0.5 ) * CELL_RAW, 3.5, ( gz + 0.5 ) * CELL_RAW );
-			marker.scale.setScalar( 1 );
-			trackGroup.add( marker );
-			cell.cpMarker = marker;
-
-		} else {
-
-			// Remove marker
-			if ( cell.cpMarker ) {
-
-				trackGroup.remove( cell.cpMarker );
-				cell.cpMarker = null;
-
-			}
-
-		}
-
-		save();
-
-	}
-
-	function eraseRoad( gx, gz ) {
-
-		const key = cellKey( gx, gz );
-		if ( ! grid.has( key ) ) return;
-
-		const cell = grid.get( key );
-		if ( cell.isFinish ) return;
-
-		if ( cell.mesh ) trackGroup.remove( cell.mesh );
-		if ( cell.cpMarker ) trackGroup.remove( cell.cpMarker );
-		grid.delete( key );
-
-		// Re-resolve neighbors
-		resolveCell( gx, gz - 1 );
-		resolveCell( gx, gz + 1 );
-		resolveCell( gx + 1, gz );
-		resolveCell( gx - 1, gz );
-
-		save();
-
-	}
-
-	function clearAll() {
-
-		for ( const [ , cell ] of grid ) {
-
-			if ( cell.mesh ) trackGroup.remove( cell.mesh );
-			if ( cell.cpMarker ) trackGroup.remove( cell.cpMarker );
-
-		}
-
-		grid.clear();
-		placeFinish();
-		save();
-
-	}
-
-	// ─── Ghost preview ────────────────────────────────────────
-
-	// Neighbor cells whose meshes are temporarily swapped during ghost preview
-	const ghostNeighborBackups = []; // { cell, originalMesh }
-
-	function addGhostPiece( type, orient, gx, gz, opacity ) {
-
-		const src = models[ type ];
-		if ( ! src ) return;
-
-		const mesh = src.clone();
-		mesh.position.set( ( gx + 0.5 ) * CELL_RAW, 0.5, ( gz + 0.5 ) * CELL_RAW );
-
-		const deg = ORIENT_DEG[ orient ] || 0;
-		mesh.rotation.y = THREE.MathUtils.degToRad( deg );
-
-		mesh.traverse( ( c ) => {
-
-			if ( c.isMesh ) {
-
-				c.material = c.material.clone();
-				c.material.transparent = true;
-				c.material.opacity = opacity;
-
-			}
-
-		} );
-
-		ghostGroup.add( mesh );
-
-	}
-
-	function updateGhost( gx, gz ) {
-
-		clearGhost();
-
-		if ( tool === 'erase' ) return;
-
-		const key = cellKey( gx, gz );
-		if ( grid.has( key ) ) return; // already occupied
-
-		// Temporarily insert ghost cell into grid
-		const ghostCell = { type: 'track-straight', orient: 0, isFinish: false, mesh: null };
-		grid.set( key, ghostCell );
-
-		// Resolve ghost: connect to neighbors, pick best pair if 3+
-		const [ type, orient ] = resolveNewTile( gx, gz );
-
-		// Update ghost cell in grid so neighbors see its correct exits
-		ghostCell.type = type;
-		ghostCell.orient = orient;
-
-		// Show ghost piece
-		addGhostPiece( type, orient, gx, gz, 0.4 );
-
-		// Check how neighbors would change and preview those changes
-		const neighbors = [ [ gx, gz - 1 ], [ gx, gz + 1 ], [ gx + 1, gz ], [ gx - 1, gz ] ];
-
-		for ( const [ nx, nz ] of neighbors ) {
-
-			const nKey = cellKey( nx, nz );
-			const nCell = grid.get( nKey );
-			if ( ! nCell ) continue;
-
-			// Re-resolve neighbor, but skip if it would break existing connections
-			const nExits = getCellExits( nCell );
-			const nConn = getConnectivityMask( nx, nz );
-			const nConnected = nExits & nConn;
-
-			const [ newType, newOrient ] = resolveTile( nx, nz );
-			const proposedExits = getCellExits( { type: newType, orient: newOrient } );
-			if ( ( proposedExits & nConnected ) !== nConnected ) continue;
-
-			const finalType = ( nCell.isFinish && newType === 'track-straight' ) ? 'track-finish' : newType;
-
-			if ( finalType !== nCell.type || newOrient !== nCell.orient ) {
-
-				// Hide the real mesh temporarily
-				if ( nCell.mesh ) {
-
-					nCell.mesh.visible = false;
-					ghostNeighborBackups.push( { cell: nCell } );
-
-				}
-
-				// Show preview of what the neighbor would become
-				addGhostPiece( finalType, newOrient, nx, nz, 0.7 );
-
-			}
-
-		}
-
-		// Remove the temporary ghost cell from the grid
-		grid.delete( key );
-
-	}
-
-	function clearGhost() {
-
-		// Restore hidden neighbor meshes
-		for ( const { cell } of ghostNeighborBackups ) {
-
-			if ( cell.mesh ) cell.mesh.visible = true;
-
-		}
-
-		ghostNeighborBackups.length = 0;
-
-		// Remove all ghost preview meshes
-		while ( ghostGroup.children.length > 0 ) {
-
-			ghostGroup.remove( ghostGroup.children[ 0 ] );
-
-		}
-
-	}
-
-	// ─── Raycasting ───────────────────────────────────────────
-
-	const raycaster = new THREE.Raycaster();
-	const mouse = new THREE.Vector2();
-	let hoveredCell = null;
-
-	function screenToGrid( clientX, clientY ) {
-
-		mouse.x = ( clientX / window.innerWidth ) * 2 - 1;
-		mouse.y = - ( clientY / window.innerHeight ) * 2 + 1;
-
-		raycaster.setFromCamera( mouse, camera );
-
-		const plane = new THREE.Plane( new THREE.Vector3( 0, 1, 0 ), 0.51 );
-		const hit = new THREE.Vector3();
-		raycaster.ray.intersectPlane( plane, hit );
-
-		if ( ! hit ) return null;
-
-		const gx = Math.floor( hit.x / cellWorld );
-		const gz = Math.floor( hit.z / cellWorld );
-
-		return { gx, gz };
-
-	}
-
-	// ─── Persistence ──────────────────────────────────────────
-
-	function save() {
-
-		const arr = [];
-		for ( const [ key, cell ] of grid ) {
-
-			const [ gx, gz ] = key.split( ',' ).map( Number );
-			arr.push( [ gx, gz, cell.type, cell.orient ] );
-
-		}
-
-		const encoded = encodeCells( arr );
-		localStorage.setItem( 'racing-editor-cells', encoded );
-
-	}
-
-	function loadSaved() {
-
-		const params = new URLSearchParams( window.location.search );
-		const mapParam = params.get( 'map' );
-		const encoded = mapParam || localStorage.getItem( 'racing-editor-cells' );
-
-		if ( ! encoded ) return;
-
-		try {
-
-			const arr = decodeCells( encoded );
-
-			for ( const entry of arr ) {
-
-				const [ gx, gz, type, orient ] = entry;
-				const isCheckpoint = entry[ 4 ] === true;
-				const isFinish = ( type === 'track-finish' );
-				const cell = { type, orient, isFinish, isCheckpoint, mesh: null, cpMarker: null };
-				grid.set( cellKey( gx, gz ), cell );
-				placeMesh( gx, gz, cell );
-
-				if ( isCheckpoint ) {
-
-					const marker = new THREE.Mesh( cpMarkerGeo, cpMarkerMat );
-					marker.position.set( ( gx + 0.5 ) * CELL_RAW, 3.5, ( gz + 0.5 ) * CELL_RAW );
-					trackGroup.add( marker );
-					cell.cpMarker = marker;
-
-				}
-
-			}
-
-		} catch ( e ) {
-
-			console.warn( 'Failed to load saved map', e );
-
-		}
-
-	}
-
-	// ─── Toast ────────────────────────────────────────────────
-
-	let toastTimer = 0;
-
-	function showToast( msg ) {
-
-		const el = document.getElementById( 'toast' );
-		el.textContent = msg;
-		el.classList.add( 'show' );
-		clearTimeout( toastTimer );
-		toastTimer = setTimeout( () => el.classList.remove( 'show' ), 2000 );
-
-	}
-
-	// ─── Toolbar ──────────────────────────────────────────────
-
-	const btnRoad = document.getElementById( 'btn-road' );
-	const btnCheckpoint = document.getElementById( 'btn-checkpoint' );
-	const btnErase = document.getElementById( 'btn-erase' );
-
-	function selectTool( t ) {
-
-		tool = t;
-		btnRoad.classList.toggle( 'active', t === 'road' );
-		btnCheckpoint.classList.toggle( 'active', t === 'checkpoint' );
-		btnErase.classList.toggle( 'active', t === 'erase' );
-
-	}
-
-	btnRoad.addEventListener( 'click', () => selectTool( 'road' ) );
-	btnCheckpoint.addEventListener( 'click', () => selectTool( 'checkpoint' ) );
-	btnErase.addEventListener( 'click', () => selectTool( 'erase' ) );
-
-	function getCellsArray() {
-
-		const arr = [];
-		for ( const [ key, cell ] of grid ) {
-
-			const [ gx, gz ] = key.split( ',' ).map( Number );
-			const entry = [ gx, gz, cell.type, cell.orient ];
-			if ( cell.isCheckpoint ) entry.push( true );
-			arr.push( entry );
-
-		}
-
-		return arr;
-
-	}
-
-	document.getElementById( 'btn-play' ).addEventListener( 'click', () => {
-
-		if ( grid.size === 0 ) {
-
-			showToast( 'Draw some road first!' );
-			return;
-
-		}
-
-		const encoded = encodeCells( getCellsArray() );
-		window.open( 'index.html?map=' + encoded, '_blank' );
-
-	} );
-
-	document.getElementById( 'btn-share' ).addEventListener( 'click', () => {
-
-		if ( grid.size === 0 ) {
-
-			showToast( 'Draw some road first!' );
-			return;
-
-		}
-
-		const encoded = encodeCells( getCellsArray() );
-		const base = window.location.href.replace( /editor\.html.*/, '' );
-		const url = base + 'index.html?map=' + encoded;
-
-		navigator.clipboard.writeText( url ).then( () => {
-
-			showToast( 'Link copied to clipboard!' );
-
-		} ).catch( () => {
-
-			showToast( url );
-
-		} );
-
-	} );
-
-	document.getElementById( 'btn-clear' ).addEventListener( 'click', () => {
-
-		clearAll();
-		showToast( 'Track cleared' );
-
-	} );
-
-	document.getElementById( 'btn-save-library' ).addEventListener( 'click', () => {
-
-		if ( grid.size === 0 ) {
-
-			showToast( 'Draw some road first!' );
-			return;
-
-		}
-
-		const name = prompt( 'Nom du circuit :', 'Mon circuit' );
-		if ( ! name || ! name.trim() ) return;
-
-		const cells = getCellsArray();
-		saveCircuit( name.trim(), cells );
-		showToast( `"${ name.trim() }" sauvegardé dans la bibliothèque !` );
-
-	} );
-
-	// ─── Input (pointer events) ───────────────────────────────
-
-	let isPanning = false;
-	let isDrawing = false;
-	let isErasing = false;
-	let panStart = { x: 0, y: 0 };
-	let camStart = { x: 0, z: 0 };
-	let lastDrawCell = null;
-	let spaceDown = false;
-
-	// Track active pointers for multi-touch (pinch/pan)
-	const pointers = new Map();
-	let pinchStartDist = 0;
-	let pinchStartZoom = 1;
-
-	const el = renderer.domElement;
-
-	el.addEventListener( 'contextmenu', ( e ) => e.preventDefault() );
-
-	function handleDraw( clientX, clientY ) {
-
-		const cell = screenToGrid( clientX, clientY );
-		if ( ! cell ) return;
-
-		if ( lastDrawCell && lastDrawCell.gx === cell.gx && lastDrawCell.gz === cell.gz ) return;
-		lastDrawCell = cell;
-
-		if ( isErasing ) {
-
-			eraseRoad( cell.gx, cell.gz );
-
-		} else if ( isDrawing ) {
-
-			if ( tool === 'checkpoint' ) {
-
-				toggleCheckpoint( cell.gx, cell.gz );
-
-			} else {
-
-				placeRoad( cell.gx, cell.gz );
-
-			}
-
-		}
-
-	}
-
-	function getPinchDist() {
-
-		const pts = [ ...pointers.values() ];
-		const dx = pts[ 1 ].x - pts[ 0 ].x;
-		const dy = pts[ 1 ].y - pts[ 0 ].y;
-		return Math.sqrt( dx * dx + dy * dy );
-
-	}
-
-	function getPinchMid() {
-
-		const pts = [ ...pointers.values() ];
-		return {
-			x: ( pts[ 0 ].x + pts[ 1 ].x ) / 2,
-			y: ( pts[ 0 ].y + pts[ 1 ].y ) / 2
-		};
-
-	}
-
-	el.addEventListener( 'pointerdown', ( e ) => {
-
-		el.setPointerCapture( e.pointerId );
-		pointers.set( e.pointerId, { x: e.clientX, y: e.clientY } );
-
-		// Two pointers → switch to pan/pinch
-		if ( pointers.size === 2 ) {
-
-			isDrawing = false;
-			isErasing = false;
-			isPanning = true;
-
-			const mid = getPinchMid();
-			panStart.x = mid.x;
-			panStart.y = mid.y;
-			camStart.x = camTarget.x;
-			camStart.z = camTarget.z;
-			pinchStartDist = getPinchDist();
-			pinchStartZoom = camera.zoom;
-			return;
-
-		}
-
-		if ( pointers.size > 2 ) return;
-
-		// Single pointer
-		// Middle mouse, ctrl+click, or space+click → pan
-		if ( e.button === 1 || ( e.button === 0 && ( e.ctrlKey || e.metaKey || spaceDown ) ) ) {
-
-			isPanning = true;
-			panStart.x = e.clientX;
-			panStart.y = e.clientY;
-			camStart.x = camTarget.x;
-			camStart.z = camTarget.z;
-			el.style.cursor = 'grabbing';
-			return;
-
-		}
-
-		if ( e.button === 0 ) {
-
-			if ( tool === 'erase' ) {
-
-				isErasing = true;
-
-			} else {
-
-				isDrawing = true;
-
-			}
-
-			lastDrawCell = null;
-
-			// On touch, defer draw until pointermove confirms single-finger gesture
-			if ( e.pointerType !== 'touch' ) handleDraw( e.clientX, e.clientY );
-
-		} else if ( e.button === 2 ) {
-
-			isErasing = true;
-			lastDrawCell = null;
-			handleDraw( e.clientX, e.clientY );
-
-		}
-
-	} );
-
-	el.addEventListener( 'pointermove', ( e ) => {
-
-		pointers.set( e.pointerId, { x: e.clientX, y: e.clientY } );
-
-		// Two-pointer pan + pinch
-		if ( pointers.size === 2 && isPanning ) {
-
-			const mid = getPinchMid();
-			const scale = frustum * 2 / window.innerHeight / camera.zoom;
-			camTarget.x = camStart.x - ( mid.x - panStart.x ) * scale;
-			camTarget.z = camStart.z - ( mid.y - panStart.y ) * scale;
-			camera.position.x = camTarget.x;
-			camera.position.z = camTarget.z;
-			camera.lookAt( camTarget.x, 0, camTarget.z );
-
-			const dist = getPinchDist();
-			camera.zoom = Math.max( 0.1, Math.min( 10, pinchStartZoom * ( dist / pinchStartDist ) ) );
-			camera.updateProjectionMatrix();
-			return;
-
-		}
-
-		// Single-pointer pan
-		if ( isPanning ) {
-
-			const zoom = camera.zoom;
-			const dx = ( e.clientX - panStart.x ) / window.innerWidth * frustum * 2 * ( window.innerWidth / window.innerHeight ) / zoom;
-			const dz = ( e.clientY - panStart.y ) / window.innerHeight * frustum * 2 / zoom;
-			camTarget.x = camStart.x - dx;
-			camTarget.z = camStart.z - dz;
-			camera.position.x = camTarget.x;
-			camera.position.z = camTarget.z;
-			camera.lookAt( camTarget.x, 0, camTarget.z );
-			return;
-
-		}
-
-		if ( isDrawing || isErasing ) {
-
-			handleDraw( e.clientX, e.clientY );
-			return;
-
-		}
-
-		// Hover ghost (mouse only)
-		if ( e.pointerType === 'mouse' ) {
-
-			const cell = screenToGrid( e.clientX, e.clientY );
-			if ( cell ) {
-
-				hoveredCell = cell;
-				updateGhost( cell.gx, cell.gz );
-
-			} else {
-
-				hoveredCell = null;
-				clearGhost();
-
-			}
-
-		}
-
-	} );
-
-	window.addEventListener( 'pointerup', ( e ) => {
-
-		pointers.delete( e.pointerId );
-
-		if ( pointers.size === 0 ) {
-
-			// Touch tap: if we deferred draw and never moved, draw now
-			if ( ( isDrawing || isErasing ) && lastDrawCell === null && ! isPanning ) {
-
-				handleDraw( e.clientX, e.clientY );
-
-			}
-
-			isPanning = false;
-			isDrawing = false;
-			isErasing = false;
-			lastDrawCell = null;
-			el.style.cursor = spaceDown ? 'grab' : '';
-
-		}
-
-	} );
-
-	window.addEventListener( 'pointercancel', ( e ) => {
-
-		pointers.delete( e.pointerId );
-
-	} );
-
-	// Trackpad: two-finger scroll → pan, pinch (ctrl+wheel) → zoom
-	el.addEventListener( 'wheel', ( e ) => {
-
-		e.preventDefault();
-
-		if ( e.ctrlKey ) {
-
-			const zoomSpeed = 1.02;
-			camera.zoom *= e.deltaY > 0 ? 1 / zoomSpeed : zoomSpeed;
-			camera.zoom = Math.max( 0.1, Math.min( 10, camera.zoom ) );
-			camera.updateProjectionMatrix();
-
-		} else {
-
-			const scale = frustum * 2 / window.innerHeight / camera.zoom;
-			camTarget.x += e.deltaX * scale;
-			camTarget.z += e.deltaY * scale;
-			camera.position.x = camTarget.x;
-			camera.position.z = camTarget.z;
-			camera.lookAt( camTarget.x, 0, camTarget.z );
-
-		}
-
-	}, { passive: false } );
-
-	window.addEventListener( 'keydown', ( e ) => {
-
-		if ( e.key === ' ' ) {
-
-			if ( ! spaceDown ) {
-
-				spaceDown = true;
-				el.style.cursor = 'grab';
-
-			}
-
-			e.preventDefault();
-
-		} else if ( e.key === '1' ) {
-
-			selectTool( 'road' );
-
-		} else if ( e.key === '2' ) {
-
-			selectTool( 'checkpoint' );
-
-		} else if ( e.key === '3' ) {
-
-			selectTool( 'erase' );
-
-		}
-
-	} );
-
-	window.addEventListener( 'keyup', ( e ) => {
-
-		if ( e.key === ' ' ) {
-
-			spaceDown = false;
-			if ( ! isPanning ) el.style.cursor = '';
-
-		}
-
-	} );
-
-	// ─── Init & render loop ───────────────────────────────────
-
-	await loadModels();
-	loadSaved();
-
-	// Start with a finish cell if the grid is empty
-	if ( grid.size === 0 ) {
-
-		placeFinish();
-
-	}
-
-	function animate() {
-
-		requestAnimationFrame( animate );
-		renderer.render( scene, camera );
-
-	}
-
-	animate();
-
+	import { initEditor } from './js/editor/Editor.js';
+	initEditor();
 	</script>
 </body>
 </html>

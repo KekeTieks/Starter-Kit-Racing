@@ -318,6 +318,11 @@ export class Lobby {
 								<span class="ms-mode-title">Créer une room</span>
 								<span class="ms-mode-desc">Invitez des amis avec un code</span>
 							</button>
+							<button class="ms-mode-card ms-mode-card--secondary" id="btn-editor">
+								<span class="ms-mode-icon">✏️</span>
+								<span class="ms-mode-title">Éditeur de circuit</span>
+								<span class="ms-mode-desc">Dessine et teste tes propres circuits</span>
+							</button>
 						</div>
 
 						<div class="ms-divider"></div>
@@ -370,6 +375,12 @@ export class Lobby {
 		document.getElementById( 'btn-create' ).addEventListener( 'click', () => {
 
 			if ( this.onPlayOnline ) this.onPlayOnline();
+
+		} );
+
+		document.getElementById( 'btn-editor' ).addEventListener( 'click', () => {
+
+			window.open( 'editor.html', '_blank' );
 
 		} );
 

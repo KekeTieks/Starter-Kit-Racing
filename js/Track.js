@@ -5,6 +5,58 @@ export const ORIENT_DEG = { 0: 0, 10: 180, 16: 90, 22: 270 };
 export const CELL_RAW = 9.99;
 export const GRID_SCALE = 0.75;
 
+// Build a procedural ramp mesh (wedge shape, front=low, back=high)
+// The vehicle approaches from +Z (front) and rises toward -Z (back).
+export function buildRampMesh( rampLength, rampAngle, rampWidth ) {
+
+	// Geometry is in the trackGroup's local space (before scale=0.75 is applied),
+	// so use CELL_RAW without GRID_SCALE — matching how GLB pieces are positioned.
+	const cellSize = CELL_RAW;
+
+	const halfW = ( cellSize / 2 ) * rampWidth;
+	const len   = rampLength * cellSize * 0.5; // half-length along travel axis
+	const h     = Math.tan( rampAngle * Math.PI / 180 ) * len * 2; // total height rise
+
+	// 6 unique vertices of the wedge:
+	//   fl/fr = front-low,  bl/br = back-low,  tl/tr = back-top
+	//   Z axis = travel direction; front (+Z) is low, back (-Z) is high
+	const fl = [ - halfW, 0,   len ];  // 0
+	const fr = [   halfW, 0,   len ];  // 1
+	const bl = [ - halfW, 0,  -len ];  // 2
+	const br = [   halfW, 0,  -len ];  // 3
+	const tl = [ - halfW, h,  -len ];  // 4
+	const tr = [   halfW, h,  -len ];  // 5
+
+	// Flat vertex array (unindexed for computeVertexNormals per-face)
+	const verts = [
+		// bottom  (winding: viewed from below → CCW = normal down)
+		...fl, ...br, ...fr,
+		...fl, ...bl, ...br,
+		// ramp surface  (normal up-forward)
+		...fl, ...fr, ...tr,
+		...fl, ...tr, ...tl,
+		// back wall
+		...bl, ...tl, ...tr,
+		...bl, ...tr, ...br,
+		// left wall  (triangle: fl-tl-bl)
+		...fl, ...tl, ...bl,
+		// right wall  (triangle: fr-br-tr)
+		...fr, ...br, ...tr,
+	];
+
+	const geo = new THREE.BufferGeometry();
+	geo.setAttribute( 'position', new THREE.Float32BufferAttribute( verts, 3 ) );
+	geo.computeVertexNormals();
+
+	const mat = new THREE.MeshStandardMaterial( { color: 0xcc8833, roughness: 0.8, metalness: 0.0 } );
+	const mesh = new THREE.Mesh( geo, mat );
+	mesh.castShadow = true;
+	mesh.receiveShadow = true;
+
+	return mesh;
+
+}
+
 const _dummy = new THREE.Object3D();
 
 export const TRACK_CELLS = [
@@ -125,10 +177,37 @@ export function buildTrack( scene, models, customCells ) {
 
 	const cells = customCells || TRACK_CELLS;
 
-	for ( const [ gx, gz, key, orient ] of cells ) {
+	for ( const entry of cells ) {
 
-		const piece = placePiece( models, key, gx, gz, orient );
+		const [ gx, gz, key, orient ] = entry;
+		const isBump = entry[ 5 ] === true;
+		const bumpOrient = entry[ 6 ] !== undefined ? entry[ 6 ] : orient;
+
+		// For track-ramp: render a road straight underneath + ramp mesh on top
+		const renderKey = key === 'track-ramp' ? 'track-straight' : key;
+		const piece = placePiece( models, renderKey, gx, gz, orient );
 		if ( piece ) trackPieceGroup.add( piece );
+
+		if ( key === 'track-ramp' ) {
+
+			const rampLength = entry[ 5 ] ?? 1.0;
+			const rampAngle  = entry[ 6 ] ?? 15;
+			const rampWidth  = entry[ 7 ] ?? 1.0;
+			const rampMesh = buildRampMesh( rampLength, rampAngle, rampWidth );
+			const deg = ORIENT_DEG[ orient ] ?? 0;
+			rampMesh.position.set( ( gx + 0.5 ) * CELL_RAW, 0.5, ( gz + 0.5 ) * CELL_RAW );
+			rampMesh.rotation.y = THREE.MathUtils.degToRad( deg );
+			trackPieceGroup.add( rampMesh );
+			continue;
+
+		}
+
+		if ( isBump ) {
+
+			const bump = placePiece( models, 'track-bump', gx, gz, bumpOrient );
+			if ( bump ) trackPieceGroup.add( bump );
+
+		}
 
 	}
 
@@ -356,55 +435,60 @@ export function placePiece( models, key, gx, gz, orient ) {
 
 }
 
-// ─── Track Codec ──────────────────────────────────────────
+// ─── Legacy base64url decoder (kept for ?map= URL param and old localStorage) ──
 
-const TYPE_NAMES = [ 'track-straight', 'track-corner', 'track-bump', 'track-finish' ];
-const TYPE_INDEX = {};
-for ( let i = 0; i < TYPE_NAMES.length; i ++ ) TYPE_INDEX[ TYPE_NAMES[ i ] ] = i;
-
+const TYPE_NAMES = [ 'track-straight', 'track-corner', 'track-bump', 'track-finish', 'track-ramp' ];
 const ORIENT_TO_GODOT = [ 0, 16, 10, 22 ];
-const GODOT_TO_ORIENT = { 0: 0, 16: 1, 10: 2, 22: 3 };
 
 export { TYPE_NAMES };
-
-export function encodeCells( cells ) {
-
-	const bytes = new Uint8Array( cells.length * 3 );
-
-	for ( let i = 0; i < cells.length; i ++ ) {
-
-		const [ gx, gz, name, godotOrient, checkpoint ] = cells[ i ];
-		const ti = TYPE_INDEX[ name ] ?? 0;
-		const oi = GODOT_TO_ORIENT[ godotOrient ] ?? 0;
-		const cp = checkpoint ? 1 : 0;
-
-		bytes[ i * 3 ] = gx + 128;
-		bytes[ i * 3 + 1 ] = gz + 128;
-		bytes[ i * 3 + 2 ] = ( cp << 4 ) | ( ti << 2 ) | oi;
-
-	}
-
-	return bytesToBase64url( bytes );
-
-}
 
 export function decodeCells( str ) {
 
 	const bytes = base64urlToBytes( str );
 	const cells = [];
+	let i = 0;
 
-	for ( let i = 0; i + 2 < bytes.length; i += 3 ) {
+	while ( i + 2 < bytes.length ) {
 
-		const gx = bytes[ i ] - 128;
-		const gz = bytes[ i + 1 ] - 128;
-		const packed = bytes[ i + 2 ];
-		const ti = ( packed >> 2 ) & 0x03;
+		const gx = bytes[ i ++ ] - 128;
+		const gz = bytes[ i ++ ] - 128;
+		const packed = bytes[ i ++ ];
 		const oi = packed & 0x03;
-		const cp = ( packed >> 4 ) & 0x01;
+		const ti = ( packed >> 2 ) & 0x07;  // 3 bits: supports typeIdx 0–4
+		const typeName = TYPE_NAMES[ ti ] ?? 'track-straight';
 
-		const cell = [ gx, gz, TYPE_NAMES[ ti ], ORIENT_TO_GODOT[ oi ] ];
-		if ( cp ) cell.push( true );
-		cells.push( cell );
+		if ( typeName === 'track-ramp' ) {
+
+			// Ramp: checkpoint is at bit 5 (bit 4 used by typeIdx high bit)
+			const cp = ( packed >> 5 ) & 0x01;
+			if ( i + 1 >= bytes.length ) break;
+			const lenByte   = bytes[ i ++ ];
+			const paramByte = bytes[ i ++ ];
+			const rampLength = lenByte / 10;
+			const ap = ( paramByte >> 4 ) & 0x0f;
+			const wp = paramByte & 0x0f;
+			const rampAngle = ap * 2 + 5;
+			const rampWidth = ( wp + 1 ) / 10;
+
+			const cell = [ gx, gz, 'track-ramp', ORIENT_TO_GODOT[ oi ] ];
+			cell.push( cp ? true : false );  // [4] isCheckpoint
+			cell.push( rampLength );          // [5]
+			cell.push( rampAngle );           // [6]
+			cell.push( rampWidth );           // [7]
+			cells.push( cell );
+
+		} else {
+
+			// Standard cell: checkpoint at bit 4, bump at bit 5, bumpOrient at bits 6–7
+			const cp = ( packed >> 4 ) & 0x01;
+			const bump = ( packed >> 5 ) & 0x01;
+			const boi = ( packed >> 6 ) & 0x03;
+			const cell = [ gx, gz, typeName, ORIENT_TO_GODOT[ oi ] ];
+			if ( cp || bump ) cell.push( cp ? true : false );
+			if ( bump ) { cell.push( true ); cell.push( ORIENT_TO_GODOT[ boi ] ); }
+			cells.push( cell );
+
+		}
 
 	}
 
@@ -464,15 +548,6 @@ export function computeTrackBounds( cells ) {
 	const halfDepth = ( maxZ - minZ + 1 ) / 2 * S + S;
 
 	return { centerX, centerZ, halfWidth, halfDepth };
-
-}
-
-function bytesToBase64url( bytes ) {
-
-	let binary = '';
-	for ( let i = 0; i < bytes.length; i ++ ) binary += String.fromCharCode( bytes[ i ] );
-
-	return btoa( binary ).replace( /\+/g, '-' ).replace( /\//g, '_' ).replace( /=+$/, '' );
 
 }
 

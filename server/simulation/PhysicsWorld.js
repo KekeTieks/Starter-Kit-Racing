@@ -1,7 +1,7 @@
 import {
     createWorldSettings, createWorld,
     addBroadphaseLayer, addObjectLayer, enableCollision,
-    registerAll, rigidBody, box, sphere,
+    registerAll, rigidBody, box, sphere, convexHull,
     MotionType, MotionQuality,
     castRay, createClosestCastRayCollector, createDefaultCastRaySettings,
     CastRayStatus, filter
@@ -187,9 +187,96 @@ function buildWallColliders( world, cells ) {
 
     }
 
-    for ( const [ gx, gz, key, orient ] of cells ) {
+    // Bump collider constants (matching client Physics.js)
+    // The bump GLB spans ~1.8 cells along travel, peaks at ~0.55 units above road surface.
+    const BUMP_HALF_W     = 3.5 * S;
+    const BUMP_PEAK_H     = 0.55 * S;
+    const BUMP_HORIZ_HALF = 0.9 * CELL_RAW * S;
+    const BUMP_SURFACE_HALF = Math.sqrt( BUMP_HORIZ_HALF ** 2 + BUMP_PEAK_H ** 2 ) / 2;
+    const BUMP_SLAB_H     = 0.08 * S;
+    const BUMP_RAMP_PITCH = Math.atan2( BUMP_PEAK_H, BUMP_HORIZ_HALF );
+    const BUMP_OFFSET_Z   = BUMP_HORIZ_HALF / 2;
 
-        if ( key === 'track-bump' ) continue;
+    function mulQuat( ax, ay, az, aw, bx, by, bz, bw ) {
+
+        return [
+            aw * bx + ax * bw + ay * bz - az * by,
+            aw * by - ax * bz + ay * bw + az * bx,
+            aw * bz + ax * by - ay * bx + az * bw,
+            aw * bw - ax * bx - ay * by - az * bz,
+        ];
+
+    }
+
+    function addBumpCollider( cx, cz, bumpRad ) {
+
+        const sinR = Math.sin( bumpRad ), cosR = Math.cos( bumpRad );
+        const roadY = 0.5 * S - 0.5;
+
+        for ( const sign of [ -1, 1 ] ) {
+
+            const oz = sign * BUMP_OFFSET_Z;
+            const wx = cx - oz * sinR;
+            const wz = cz + oz * cosR;
+            const wy = roadY + BUMP_PEAK_H * 0.5 - BUMP_SLAB_H * Math.cos( BUMP_RAMP_PITCH );
+            const pitch = sign * BUMP_RAMP_PITCH;
+
+            const qy = [ 0, Math.sin( bumpRad / 2 ), 0, Math.cos( bumpRad / 2 ) ];
+            const qp = [ Math.sin( pitch / 2 ), 0, 0, Math.cos( pitch / 2 ) ];
+            const [ qx2, qy2, qz2, qw2 ] = mulQuat( ...qy, ...qp );
+
+            wallBodies.add( rigidBody.create( world, {
+                shape: box.create( { halfExtents: [ BUMP_HALF_W, BUMP_SLAB_H, BUMP_SURFACE_HALF ] } ),
+                motionType: MotionType.STATIC,
+                objectLayer: world._OL_STATIC,
+                position: [ wx, wy, wz ],
+                quaternion: [ qx2, qy2, qz2, qw2 ],
+                friction: 0.3,
+                restitution: 0.0,
+            } ) );
+
+        }
+
+    }
+
+    function addRampCollider( cx, cz, rampRad, rampLength, rampAngle, rampWidth ) {
+
+        const halfW  = ( CELL_RAW / 2 ) * S * rampWidth;
+        const len    = rampLength * CELL_RAW * S * 0.5;
+        const h      = Math.tan( rampAngle * Math.PI / 180 ) * len * 2;
+        const roadY  = 0.5 * S - 0.5;
+
+        const positions = [
+            -halfW, 0,   len,
+             halfW, 0,   len,
+            -halfW, 0,  -len,
+             halfW, 0,  -len,
+            -halfW, h,  -len,
+             halfW, h,  -len,
+        ];
+
+        const shape = convexHull.create( { positions } );
+        const qy = [ 0, Math.sin( rampRad / 2 ), 0, Math.cos( rampRad / 2 ) ];
+
+        wallBodies.add( rigidBody.create( world, {
+            shape,
+            motionType: MotionType.STATIC,
+            objectLayer: world._OL_STATIC,
+            position: [ cx, roadY, cz ],
+            quaternion: qy,
+            friction: 0.3,
+            restitution: 0.0,
+        } ) );
+
+    }
+
+    for ( const entry of cells ) {
+
+        const [ gx, gz, key, orient ] = entry;
+        const isBump     = entry[ 5 ] === true;
+        const bumpOrient = entry[ 6 ] !== undefined ? entry[ 6 ] : orient;
+
+        if ( key === 'track-bump' ) continue; // legacy guard
 
         const cx = ( gx + 0.5 ) * CELL_RAW * S;
         const cz = ( gz + 0.5 ) * CELL_RAW * S;
@@ -198,7 +285,7 @@ function buildWallColliders( world, cells ) {
         const rad = deg * Math.PI / 180;
         const cr = Math.cos( rad ), sr = Math.sin( rad );
 
-        if ( key === 'track-straight' || key === 'track-finish' ) {
+        if ( key === 'track-straight' || key === 'track-finish' || key === 'track-ramp' ) {
 
             for ( const side of [ -1, 1 ] ) {
 
@@ -226,6 +313,23 @@ function buildWallColliders( world, cells ) {
 
             addArcWall( wcx, wcz, arcStart, OUTER_R, OUTER_SEG, OUTER_SEG_HALF_LEN );
             addArcWall( wcx, wcz, arcStart, INNER_R, INNER_SEG, INNER_SEG_HALF_LEN );
+
+        }
+
+        if ( key === 'track-ramp' ) {
+
+            const rampLength = entry[ 5 ] ?? 1.0;
+            const rampAngle  = entry[ 6 ] ?? 15;
+            const rampWidth  = entry[ 7 ] ?? 1.0;
+            const rampDeg = ORIENT_DEG[ orient ] ?? 0;
+            const rampRad = rampDeg * Math.PI / 180;
+            addRampCollider( cx, cz, rampRad, rampLength, rampAngle, rampWidth );
+
+        } else if ( isBump ) {
+
+            const bumpDeg = ORIENT_DEG[ bumpOrient ] ?? 0;
+            const bumpRad2 = bumpDeg * Math.PI / 180;
+            addBumpCollider( cx, cz, bumpRad2 );
 
         }
 

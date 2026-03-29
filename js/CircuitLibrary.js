@@ -8,6 +8,7 @@ const MINIMAP_COLORS = {
 	'track-corner':   '#6688bb',
 	'track-finish':   '#dd4444',
 	'track-bump':     '#cc8833',
+	'track-ramp':     '#dd9944',
 };
 
 const BUILTIN_CIRCUITS = [
@@ -52,6 +53,31 @@ export function saveCircuit( name, cells ) {
 	custom.push( { id, name, cells, createdAt: Date.now(), builtin: false } );
 	localStorage.setItem( LS_KEY, JSON.stringify( custom ) );
 	return id;
+
+}
+
+export function updateCircuit( id, cells ) {
+
+	let custom = [];
+
+	try {
+
+		const raw = localStorage.getItem( LS_KEY );
+		if ( raw ) custom = JSON.parse( raw );
+
+	} catch ( _e ) {
+
+		custom = [];
+
+	}
+
+	const idx = custom.findIndex( ( c ) => c.id === id );
+	if ( idx !== - 1 ) {
+
+		custom[ idx ] = { ...custom[ idx ], cells, updatedAt: Date.now() };
+		localStorage.setItem( LS_KEY, JSON.stringify( custom ) );
+
+	}
 
 }
 

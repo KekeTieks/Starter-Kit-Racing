@@ -17,6 +17,7 @@ export class Network {
         this._lastInputX = 0;
         this._lastInputZ = 0;
         this._lastTouchActive = false;
+        this._lastHandbrake = false;
         this._inputIdleFrames = 0;
 
         // Callbacks
@@ -241,23 +242,25 @@ export class Network {
         const x = input.x;
         const z = input.z;
         const touch = !! input.touchActive;
+        const hb = !! input.handbrake;
 
-        const changed = x !== this._lastInputX || z !== this._lastInputZ || touch !== this._lastTouchActive;
+        const changed = x !== this._lastInputX || z !== this._lastInputZ || touch !== this._lastTouchActive || hb !== this._lastHandbrake;
 
         if ( changed ) {
 
             this._lastInputX = x;
             this._lastInputZ = z;
             this._lastTouchActive = touch;
+            this._lastHandbrake = hb;
             this._inputIdleFrames = 0;
-            this.room.send( 'input', { x, z, touchActive: touch } );
+            this.room.send( 'input', { x, z, touchActive: touch, handbrake: hb } );
 
         } else {
 
             this._inputIdleFrames++;
             if ( this._inputIdleFrames % 10 === 0 ) {
 
-                this.room.send( 'input', { x, z, touchActive: touch } );
+                this.room.send( 'input', { x, z, touchActive: touch, handbrake: hb } );
 
             }
 

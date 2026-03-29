@@ -9,6 +9,7 @@ import { Controls } from './Controls.js';
 import { buildTrack, encodeCells, decodeCells, computeSpawnPosition, computeTrackBounds } from './Track.js';
 import { buildWallColliders, createSphereBody, createChassisBody, createKinematicSphereBody, initRayFilter } from './Physics.js';
 import { SmokeTrails } from './Particles.js';
+import { Skidmarks } from './Skidmarks.js';
 import { GameAudio } from './Audio.js';
 import { Network } from './Network.js';
 import { Lobby } from './Lobby.js';
@@ -209,6 +210,7 @@ function initSinglePlayer( customCells, spawn, vehicleKey ) {
 
 	const controls = new Controls();
 	const particles = new SmokeTrails( scene );
+	const skidmarks = new Skidmarks( scene );
 
 	const audio = new GameAudio();
 	audio.init( cam.camera );
@@ -261,6 +263,7 @@ function initSinglePlayer( customCells, spawn, vehicleKey ) {
 
 		cam.update( dt, vehicle.spherePos );
 		particles.update( dt, vehicle );
+		skidmarks.update( dt, vehicle );
 		audio.update( dt, vehicle.linearSpeed, input.z, vehicle.driftIntensity );
 
 		renderer.render( scene, cam.camera );
@@ -289,6 +292,7 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 	const cam = new Camera();
 	const controls = new Controls();
 	const particles = new SmokeTrails( scene );
+	const skidmarks = new Skidmarks( scene );
 
 	const audio = new GameAudio();
 	audio.init( cam.camera );
@@ -446,6 +450,7 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 		const remote = remoteVehicles.get( sessionId );
 		if ( remote ) {
 
+			skidmarks.removeVehicle( remote );
 			remote.dispose( scene );
 			remoteVehicles.delete( sessionId );
 
@@ -572,8 +577,9 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 
 		remoteParticles.clear();
 
-		// Dispose particles
+		// Dispose particles and skidmarks
 		particles.dispose( scene );
+		skidmarks.dispose( scene );
 
 		// Remove local vehicle from scene
 		if ( vehicle.container.parent ) {
@@ -669,6 +675,7 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 
 			cam.update( dt, vehicle.spherePos );
 			particles.update( dt, vehicle );
+			skidmarks.update( dt, vehicle );
 			audio.update( dt, vehicle.linearSpeed, input.z, vehicle.driftIntensity );
 
 			hud.updateLapDisplay( myState, network.totalLaps );
@@ -684,6 +691,7 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 
 			const rp = remoteParticles.get( sessionId );
 			if ( rp ) rp.update( dt, remote );
+			skidmarks.update( dt, remote );
 
 			// Move kinematic proxy body to match server position for local collision detection
 			const proxyBody = remoteProxyBodies.get( sessionId );

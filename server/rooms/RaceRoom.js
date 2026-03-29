@@ -162,6 +162,7 @@ export class RaceRoom extends Room {
                 x: Math.max( -1, Math.min( 1, data.x ) ),
                 z: Math.max( -1, Math.min( 1, data.z ) ),
                 touchActive: !! data.touchActive,
+                handbrake: !! data.handbrake,
             } );
 
         } );

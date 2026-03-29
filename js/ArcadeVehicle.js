@@ -252,8 +252,16 @@ export class ArcadeVehicle {
 
 			}
 
+			// Handbrake: progressive rear-wheel drag (weaker than full brake, allows sliding)
+			if ( input.handbrake && speed > 0.1 ) {
+
+				const hbForce = cfg.brakeForce * 0.45;
+				this._pushForce( - fwd0 * hbForce, 0, - fwd2 * hbForce, cx, cy, cz );
+
+			}
+
 			// Engine braking: when no input, gentle deceleration
-			if ( input.throttle === 0 && input.brake === 0 && absSpeed > 0.1 ) {
+			if ( input.throttle === 0 && input.brake === 0 && ! input.handbrake && absSpeed > 0.1 ) {
 
 				const engineBrakeF = absSpeed * cfg.mass * 0.8;
 				const dir = speed > 0 ? - 1 : 1;
@@ -346,14 +354,19 @@ export class ArcadeVehicle {
 			const latSpeed = v3Dot( chassis.linearVelocity, this._right );
 
 			const steerMag = Math.abs( input.steer );
-			const shouldDrift = absSpeed > cfg.driftThreshold * 2 && steerMag > 0.5;
+			const handbrake = !! input.handbrake;
+
+			// Handbrake or cornering at speed triggers drift
+			const shouldDrift = handbrake || ( absSpeed > cfg.driftThreshold * 2 && steerMag > 0.5 );
 
 			if ( shouldDrift && ! this.drifting ) this.drifting = true;
 			else if ( ! shouldDrift && this.drifting && steerMag < 0.3 ) this.drifting = false;
 
 			if ( this.drifting ) {
 
-				this.currentRearGrip = lerp( this.currentRearGrip, cfg.driftGripRear, 1 - Math.exp( - 8 * dt ) );
+				// Handbrake: near-zero rear grip so the back slides freely
+				const targetRearGrip = handbrake ? cfg.driftGripRear * 0.15 : cfg.driftGripRear;
+				this.currentRearGrip = lerp( this.currentRearGrip, targetRearGrip, 1 - Math.exp( - 8 * dt ) );
 
 			} else {
 

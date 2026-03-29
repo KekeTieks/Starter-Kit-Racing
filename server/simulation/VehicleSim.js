@@ -108,6 +108,7 @@ export class VehicleSim {
         this.inputX = 0;
         this.inputZ = 0;
         this.touchActive = false;
+        this.handbrake = false;
 
         this.driftIntensity = 0;
 
@@ -153,6 +154,7 @@ export class VehicleSim {
         this.inputX = input.x || 0;
         this.inputZ = input.z || 0;
         this.touchActive = !! input.touchActive;
+        this.handbrake = !! input.handbrake;
 
     }
 
@@ -253,7 +255,7 @@ export class VehicleSim {
         }
 
         // Run arcade vehicle physics
-        const result = this._arcadeVehicle.update( dt, cs, { steer, throttle, brake }, this._rayResults );
+        const result = this._arcadeVehicle.update( dt, cs, { steer, throttle, brake, handbrake: this.handbrake }, this._rayResults );
 
         // Apply forces
         for ( let i = 0; i < result.forceCount; i++ ) {

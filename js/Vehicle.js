@@ -163,8 +163,9 @@ export class Vehicle {
 		this.inputX = controlsInput.x;
 		this.inputZ = controlsInput.z;
 
-		// Process input into steer / throttle / brake
+		// Process input into steer / throttle / brake / handbrake
 		let steer = 0, throttle = 0, brake = 0;
+		const handbrake = !! controlsInput.handbrake;
 
 		if ( controlsInput.touchActive && ( this.inputX !== 0 || this.inputZ !== 0 ) ) {
 
@@ -238,7 +239,7 @@ export class Vehicle {
 		}
 
 		// Run arcade vehicle physics
-		const result = this._arcadeVehicle.update( dt, cs, { steer, throttle, brake }, this._rayResults );
+		const result = this._arcadeVehicle.update( dt, cs, { steer, throttle, brake, handbrake }, this._rayResults );
 
 		// Apply forces to chassis body
 		for ( let i = 0; i < result.forceCount; i ++ ) {

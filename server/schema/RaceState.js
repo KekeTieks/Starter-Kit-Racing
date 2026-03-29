@@ -39,4 +39,5 @@ export const RaceState = schema({
     raceTimer: "number",
     finishCount: "number",
     roomCode: { type: "string", default: "" },
+    weather: { type: "string", default: "clear" },
 });

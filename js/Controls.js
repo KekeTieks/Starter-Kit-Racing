@@ -14,6 +14,7 @@ export class Controls {
 		this.touchDirY   = 0;
 
 		this.handbrake = false;
+		this.nitro = false;
 
 		window.addEventListener( 'keydown', ( e ) => this.keys[ e.code ] = true );
 		window.addEventListener( 'keyup',   ( e ) => this.keys[ e.code ] = false );
@@ -122,15 +123,17 @@ export class Controls {
 
 		}
 
-		// ── Handbrake ────────────────────────────────────────
+		// ── Handbrake & Nitro ────────────────────────────────
 		let handbrake = !! this.keys[ 'Space' ];
+		let nitro = !! this.keys[ 'ShiftLeft' ] || !! this.keys[ 'ShiftRight' ];
 
-		// Gamepad: B button (index 1)
+		// Gamepad: B button (index 1) = handbrake, A button (index 0) = nitro
 		const gamepads2 = navigator.getGamepads();
 		for ( const gp of gamepads2 ) {
 
 			if ( ! gp ) continue;
 			if ( gp.buttons[ 1 ] && gp.buttons[ 1 ].pressed ) handbrake = true;
+			if ( gp.buttons[ 0 ] && gp.buttons[ 0 ].pressed ) nitro = true;
 			break;
 
 		}
@@ -138,8 +141,9 @@ export class Controls {
 		this.x = x;
 		this.z = z;
 		this.handbrake = handbrake;
+		this.nitro = nitro;
 
-		return { x, z, touchActive: this.touchActive, handbrake };
+		return { x, z, touchActive: this.touchActive, handbrake, nitro };
 
 	}
 

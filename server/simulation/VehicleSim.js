@@ -111,6 +111,7 @@ export class VehicleSim {
         this.handbrake = false;
 
         this.driftIntensity = 0;
+        this.weatherType = 'clear';
 
         this.prevPosX = this.spherePos[ 0 ];
         this.prevPosZ = this.spherePos[ 2 ];
@@ -253,6 +254,9 @@ export class VehicleSim {
             }
 
         }
+
+        // Propagate weather to arcade physics
+        this._arcadeVehicle.weatherType = this.weatherType || 'clear';
 
         // Run arcade vehicle physics
         const result = this._arcadeVehicle.update( dt, cs, { steer, throttle, brake, handbrake: this.handbrake }, this._rayResults );

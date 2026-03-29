@@ -60,6 +60,29 @@ const MIGRATIONS = [
 
     `CREATE INDEX IF NOT EXISTS idx_upgrades_player ON vehicle_upgrades(player_id)`,
 
+    // ── 004: vehicle cosmetics ───────────────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS vehicle_cosmetics (
+        id         SERIAL PRIMARY KEY,
+        player_id  INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+        vehicle    VARCHAR(20) NOT NULL,
+        slot_id    VARCHAR(50) NOT NULL,
+        item_id    VARCHAR(80) NOT NULL,
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(player_id, vehicle, slot_id)
+    )`,
+
+    `CREATE INDEX IF NOT EXISTS idx_cosmetics_player ON vehicle_cosmetics(player_id)`,
+
+    `CREATE TABLE IF NOT EXISTS owned_cosmetics (
+        id         SERIAL PRIMARY KEY,
+        player_id  INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+        item_id    VARCHAR(80) NOT NULL,
+        purchased_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(player_id, item_id)
+    )`,
+
+    `CREATE INDEX IF NOT EXISTS idx_owned_cosmetics_player ON owned_cosmetics(player_id)`,
+
 ];
 
 export async function migrate() {

@@ -3,6 +3,7 @@ import { rigidBody } from 'crashcat';
 import { ArcadeVehicle } from './ArcadeVehicle.js';
 import { USE_ARCADE_VEHICLE } from './VehicleStats.js';
 import { castWheelRay } from './Physics.js';
+import { applyCosmetics, stripCosmetics } from './CosmeticApplicator.js';
 
 const _tmpVec = new THREE.Vector3();
 const _forward = new THREE.Vector3();
@@ -15,6 +16,31 @@ const _currQ = new THREE.Quaternion();
 const _up = new THREE.Vector3( 0, 1, 0 );
 
 const LINEAR_DAMP = 0.1;
+
+// Fallback anchor nodes used when the GLB has no headlight_* nodes yet.
+// Positions are in container space (GLB model space × scale 0.5).
+// Values derived from green truck GLB: front z=1.512, rear z=-1.326 in model space.
+const _FALLBACK_FRONT = [
+	new THREE.Vector3( -0.151, 0.297, 0.756 ),
+	new THREE.Vector3(  0.150, 0.297, 0.756 ),
+];
+const _FALLBACK_REAR = [
+	new THREE.Vector3( -0.196, 0.398, -0.663 ),
+	new THREE.Vector3(  0.196, 0.398, -0.663 ),
+];
+
+function _makeFallbackNodes( anchors, container ) {
+
+	return anchors.map( ( pos ) => {
+
+		const obj = new THREE.Object3D();
+		obj.position.copy( pos );
+		container.add( obj );
+		return obj;
+
+	} );
+
+}
 
 function lerpAngle( a, b, t ) {
 
@@ -57,6 +83,14 @@ export class Vehicle {
 		this.inputZ = 0;
 
 		this.driftIntensity = 0;
+
+		// ── Nitro system ────────────────────────────────────────
+		this.nitroGauge = 0;          // 0..1, current charge level
+		this.nitroActive = false;     // true while boost is firing
+		this._nitroPassiveRate = 0.04;  // gauge per second (passive recharge)
+		this._nitroDriftRate = 0.15;    // additional gauge per second while drifting
+		this._nitroDrainRate = 0.35;    // gauge per second while using nitro
+		this._nitroBoostMult = 1.6;     // engine force multiplier during nitro
 
 		// Post-collision reconciliation cooldown (frames to skip soft correction after a contact)
 		this._postContactFrames = 0;
@@ -107,7 +141,10 @@ export class Vehicle {
 
 		this.container.add( vehicleModel );
 
-		// Find body and wheel nodes
+		this._frontLightNodes = [];
+		this._rearLightNodes  = [];
+
+		// Find body, wheel and headlight nodes
 		vehicleModel.traverse( ( child ) => {
 
 			const name = child.name.toLowerCase();
@@ -127,6 +164,18 @@ export class Vehicle {
 				if ( name.includes( 'back' ) && name.includes( 'left' ) ) this.wheelBL = child;
 				if ( name.includes( 'back' ) && name.includes( 'right' ) ) this.wheelBR = child;
 
+			} else if ( name.includes( 'headlight' ) ) {
+
+				if ( name.includes( 'rear' ) ) {
+
+					this._rearLightNodes.push( child );
+
+				} else {
+
+					this._frontLightNodes.push( child );
+
+				}
+
 			}
 
 			if ( child.isMesh ) {
@@ -139,6 +188,24 @@ export class Vehicle {
 		} );
 
 		return this.container;
+
+	}
+
+	/**
+	 * Apply a cosmetic loadout to this vehicle.
+	 * Call after init(). Can be called again to swap cosmetics at runtime.
+	 * @param {Object} loadout — { [slotId]: itemId | null }
+	 */
+	async applyLoadout( loadout ) {
+
+		if ( loadout ) await applyCosmetics( this.container, loadout );
+
+	}
+
+	/** Strip all cosmetics back to stock appearance. */
+	stripCosmetics() {
+
+		stripCosmetics( this.container );
 
 	}
 
@@ -238,8 +305,27 @@ export class Vehicle {
 
 		}
 
+		// ── Nitro charge / drain ────────────────────────────
+		// Require a minimum gauge to activate; once active, drain first then check
+		if ( !! controlsInput.nitro && this.nitroGauge > 0.01 ) {
+
+			this.nitroGauge = Math.max( 0, this.nitroGauge - this._nitroDrainRate * dt );
+			this.nitroActive = this.nitroGauge > 0;
+
+		} else {
+
+			this.nitroActive = false;
+			// Passive recharge + drift bonus
+			let chargeRate = this._nitroPassiveRate;
+			if ( this._arcadeVehicle.drifting ) chargeRate += this._nitroDriftRate;
+			this.nitroGauge = Math.min( 1, this.nitroGauge + chargeRate * dt );
+
+		}
+
+		const nitroMult = this.nitroActive ? this._nitroBoostMult : 1;
+
 		// Run arcade vehicle physics
-		const result = this._arcadeVehicle.update( dt, cs, { steer, throttle, brake, handbrake }, this._rayResults );
+		const result = this._arcadeVehicle.update( dt, cs, { steer, throttle, brake, handbrake, nitroMult }, this._rayResults );
 
 		// Apply forces to chassis body
 		for ( let i = 0; i < result.forceCount; i ++ ) {
@@ -680,5 +766,122 @@ export class Vehicle {
 		this.linearSpeed = this.linearSpeed + ( serverState.linearSpeed - this.linearSpeed ) * 0.15;
 
 	}
+
+	set weatherType( type ) {
+
+		if ( this._arcadeVehicle ) this._arcadeVehicle.weatherType = type;
+
+	}
+
+	/**
+	 * Attach lights to GLB headlight nodes (front + rear), falling back to
+	 * hardcoded positions if the model has no headlight_* nodes yet.
+	 * Call once after init(). All lights are off by default.
+	 */
+	addHeadlights() {
+
+		this._frontSpots = [];
+		this._rearLights = [];
+
+		// Materials for front (white) and rear (red) bulb nodes
+		this._frontMatOff = new THREE.MeshBasicMaterial( { color: 0x2a2e33 } );
+		this._frontMatOn  = new THREE.MeshBasicMaterial( { color: 0xfff5cc } );
+		this._rearMatOff  = new THREE.MeshBasicMaterial( { color: 0x2a0000 } );
+		this._rearMatOn   = new THREE.MeshBasicMaterial( { color: 0xff2200 } );
+
+		// ── Front headlights (SpotLight, white, aimed forward + down) ──
+		const frontNodes = this._frontLightNodes.length > 0
+			? this._frontLightNodes
+			: _makeFallbackNodes( _FALLBACK_FRONT, this.container );
+
+		for ( const node of frontNodes ) {
+
+			const spot = new THREE.SpotLight( 0xfff5e0, 0, 18, Math.PI / 7, 0.4, 1.5 );
+			const target = new THREE.Object3D();
+			target.position.set( 0, -0.6, 8 );
+			node.add( target );
+			spot.target = target;
+			node.add( spot );
+			this._frontSpots.push( spot );
+
+			if ( node.isMesh ) node.material = this._frontMatOff;
+
+		}
+
+		// ── Rear lights (PointLight, red, low intensity) ──
+		const rearNodes = this._rearLightNodes.length > 0
+			? this._rearLightNodes
+			: _makeFallbackNodes( _FALLBACK_REAR, this.container );
+
+		for ( const node of rearNodes ) {
+
+			const pt = new THREE.PointLight( 0xff1500, 0, 3, 2 );
+			node.add( pt );
+			this._rearLights.push( pt );
+
+			if ( node.isMesh ) node.material = this._rearMatOff;
+
+		}
+
+		this._headlightsOn = false;
+		this._rearIntensity = 0; // current smoothed intensity
+
+	}
+
+	/** Turn all vehicle lights on or off. */
+	setHeadlights( on ) {
+
+		if ( ! this._frontSpots ) return;
+		this._headlightsOn = on;
+
+		for ( const spot of this._frontSpots ) spot.intensity = on ? 18 : 0;
+
+		// Rear lights: snap to position intensity (or off), brake smoothing handles the rest
+		if ( ! on ) {
+
+			this._rearIntensity = 0;
+			for ( const pt of this._rearLights ) pt.intensity = 0;
+			for ( const node of this._rearLightNodes ) {
+
+				if ( node.isMesh ) node.material = this._rearMatOff;
+
+			}
+
+		}
+
+		for ( const node of this._frontLightNodes ) {
+
+			if ( node.isMesh ) node.material = on ? this._frontMatOn : this._frontMatOff;
+
+		}
+
+	}
+
+	/**
+	 * Smoothly update rear light intensity based on braking input.
+	 * Call every frame from the game loop (only when headlights are on).
+	 * @param {number} dt
+	 * @param {{ z: number, handbrake: boolean }} input
+	 */
+	updateBrakeLights( dt, input ) {
+
+		if ( ! this._rearLights || ! this._headlightsOn ) return;
+
+		const braking = input.z < -0.05 || input.handbrake;
+		const target  = braking ? 4.0 : 0.8;
+		this._rearIntensity += ( target - this._rearIntensity ) * ( 1 - Math.exp( -dt * 12 ) );
+
+		for ( const pt of this._rearLights ) pt.intensity = this._rearIntensity;
+
+		const bright = this._rearIntensity > 2.0;
+		for ( const node of this._rearLightNodes ) {
+
+			if ( node.isMesh ) node.material = bright ? this._rearMatOn : this._rearMatOff;
+
+		}
+
+	}
+
+	get headlightsOn() { return !! this._headlightsOn; }
 
 }

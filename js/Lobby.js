@@ -5,6 +5,8 @@ import { gsap } from 'gsap';
 import { profileService } from './ProfileService.js';
 import { upgradeService } from './UpgradeService.js';
 import { UPGRADE_CONFIG, MAX_UPGRADE_LEVEL } from './UpgradeConfig.js';
+import { cosmeticService } from './CosmeticService.js';
+import { COSMETIC_SLOTS, getItemsForSlot, getItem } from './CosmeticConfig.js';
 
 const LS_USERNAME = 'racing_username';
 const LS_VEHICLE  = 'racing_vehicle';
@@ -59,9 +61,10 @@ export class Lobby {
 		this.selectedCells    = null;
 
 		// Multiplayer room state
-		this.selectedMode = 'race';
-		this.selectedLaps = 3;
-		this.isHost       = false;
+		this.selectedMode    = 'race';
+		this.selectedLaps    = 3;
+		this.selectedWeather = 'random';
+		this.isHost          = false;
 
 		this._buildIdentityScreen();
 
@@ -73,6 +76,7 @@ export class Lobby {
 	getVehicle()       { return this.selectedVehicle; }
 	getUpgrades()      { return upgradeService.getVehicleUpgrades( this.selectedVehicle ); }
 	getSelectedCells() { return this.selectedCells; }
+	getWeather()       { return this.selectedWeather; }
 
 	// ─── Screen transition helper ────────────────────────────────────────────
 
@@ -204,8 +208,9 @@ export class Lobby {
 			this.selectedUsername = profileService.username;
 			localStorage.setItem( LS_USERNAME, this.selectedUsername );
 
-			// Load upgrades from server in background (non-blocking)
+			// Load upgrades and cosmetics from server in background (non-blocking)
 			upgradeService.loadFromServer( this.selectedUsername );
+			cosmeticService.loadFromServer( this.selectedUsername );
 
 			this._transition( () => this._buildModeScreen() );
 
@@ -415,6 +420,8 @@ export class Lobby {
 				</div>
 			</div>`;
 
+		let activeTab = 'upgrades';
+
 		const renderUpgradesSection = ( key ) => {
 
 			const credits = profileService.credits;
@@ -458,6 +465,88 @@ export class Lobby {
 
 		};
 
+		const renderCosmeticsSection = ( key ) => {
+
+			const credits = profileService.credits;
+			const playerLevel = profileService.level;
+
+			const slotBlocks = COSMETIC_SLOTS.map( ( slot ) => {
+
+				const items = getItemsForSlot( slot.id );
+				const equipped = cosmeticService.getEquipped( key, slot.id );
+
+				const itemRows = items.map( ( item ) => {
+
+					const owned = cosmeticService.isOwned( item.id );
+					const isEquipped = equipped === item.id;
+					const canAfford = credits >= item.cost;
+					const levelOk = playerLevel >= ( item.requiredLevel || 1 );
+
+					let btnHtml;
+					if ( isEquipped ) {
+
+						btnHtml = `<button class="cos-btn cos-btn--equipped" data-item="${ escHtml( item.id ) }" data-slot="${ escHtml( slot.id ) }">Équipé</button>`;
+
+					} else if ( owned ) {
+
+						btnHtml = `<button class="cos-btn cos-btn--equip" data-item="${ escHtml( item.id ) }" data-slot="${ escHtml( slot.id ) }">Équiper</button>`;
+
+					} else if ( ! levelOk ) {
+
+						btnHtml = `<button class="cos-btn" disabled>Niv.${ item.requiredLevel }</button>`;
+
+					} else if ( ! canAfford ) {
+
+						btnHtml = `<button class="cos-btn" disabled>${ item.cost } cr</button>`;
+
+					} else {
+
+						btnHtml = `<button class="cos-btn cos-btn--buy" data-item="${ escHtml( item.id ) }" data-slot="${ escHtml( slot.id ) }">${ item.cost } cr</button>`;
+
+					}
+
+					return `
+						<div class="cos-item${ isEquipped ? ' cos-item--active' : '' }">
+							<span class="cos-item-name">${ escHtml( item.name ) }</span>
+							${ btnHtml }
+						</div>`;
+
+				} ).join( '' );
+
+				const hasEquipped = equipped !== null;
+				const unequipBtn = hasEquipped
+					? `<button class="cos-unequip" data-slot="${ escHtml( slot.id ) }">Retirer</button>`
+					: '';
+
+				return `
+					<div class="cos-slot">
+						<div class="cos-slot-header">
+							<span class="cos-slot-icon">${ slot.icon }</span>
+							<span class="cos-slot-name">${ escHtml( slot.name ) }</span>
+							${ unequipBtn }
+						</div>
+						<div class="cos-items">${ itemRows }</div>
+					</div>`;
+
+			} ).join( '' );
+
+			return `
+				<div class="vc-cosmetics-section" id="vc-cosmetics">
+					<div class="upg-header">
+						<span>COSMÉTIQUES</span>
+						<span class="upg-credits">${ credits } cr</span>
+					</div>
+					${ slotBlocks }
+				</div>`;
+
+		};
+
+		const renderTabs = () => `
+			<div class="vc-tabs" id="vc-tabs">
+				<button class="vc-tab${ activeTab === 'upgrades'  ? ' vc-tab--active' : '' }" data-tab="upgrades">Améliorations</button>
+				<button class="vc-tab${ activeTab === 'cosmetics' ? ' vc-tab--active' : '' }" data-tab="cosmetics">Cosmétiques</button>
+			</div>`;
+
 		const key     = keys[ idx ];
 		const display = upgradeService.getDisplayStats( key );
 
@@ -496,7 +585,10 @@ export class Lobby {
 						${ statRow( 'Maniabilité',  +display.handling.toFixed( 1 ), 7 ) }
 						${ statRow( 'Accélération', +display.acceleration.toFixed( 1 ), 7 ) }
 					</div>
-					${ renderUpgradesSection( key ) }
+					${ renderTabs() }
+					<div class="vc-tab-content" id="vc-tab-content">
+						${ activeTab === 'upgrades' ? renderUpgradesSection( key ) : renderCosmeticsSection( key ) }
+					</div>
 					<button id="vc-btn-select" class="vc-select-btn">
 						Choisir ce véhicule
 					</button>
@@ -507,6 +599,7 @@ export class Lobby {
 		// Mount renderer inside canvas wrap
 		const wrap = document.getElementById( 'vc-canvas-wrap' );
 		this._carousel = new VehicleCarousel( wrap, key );
+		this._carousel.applyLoadout( cosmeticService.getLoadout( key ) );
 
 		// Bind upgrade purchase buttons for a given vehicle key
 		const bindUpgradeButtons = ( vehicleKey ) => {
@@ -548,7 +641,136 @@ export class Lobby {
 
 		};
 
-		// renderInfo must be declared after bindUpgradeButtons (used inside it)
+		// Bind cosmetic buttons (buy / equip / unequip)
+		const bindCosmeticButtons = ( vehicleKey ) => {
+
+			// Buy buttons
+			document.querySelectorAll( '.cos-btn--buy' ).forEach( ( btn ) => {
+
+				btn.addEventListener( 'click', async () => {
+
+					const itemId = btn.dataset.item;
+					btn.disabled = true;
+					btn.textContent = '…';
+
+					const username = profileService.username;
+					if ( ! username ) { btn.textContent = 'Non connecté'; return; }
+
+					const result = await cosmeticService.purchase( username, itemId );
+
+					if ( result.ok ) {
+
+						profileService.applyCredits( result.newCredits );
+
+					} else {
+
+						btn.textContent = result.error || 'Erreur';
+						await new Promise( ( r ) => setTimeout( r, 1200 ) );
+
+					}
+
+					renderInfo( vehicleKey );
+
+				} );
+
+			} );
+
+			// Equip buttons
+			document.querySelectorAll( '.cos-btn--equip' ).forEach( ( btn ) => {
+
+				btn.addEventListener( 'click', async () => {
+
+					const itemId = btn.dataset.item;
+					const slotId = btn.dataset.slot;
+					btn.disabled = true;
+					btn.textContent = '…';
+
+					const username = profileService.username;
+					if ( ! username ) { btn.textContent = 'Non connecté'; return; }
+
+					await cosmeticService.equipOnServer( username, vehicleKey, slotId, itemId );
+					renderInfo( vehicleKey );
+
+				} );
+
+			} );
+
+			// Equipped → unequip on click
+			document.querySelectorAll( '.cos-btn--equipped' ).forEach( ( btn ) => {
+
+				btn.addEventListener( 'click', async () => {
+
+					const slotId = btn.dataset.slot;
+					btn.disabled = true;
+					btn.textContent = '…';
+
+					const username = profileService.username;
+					if ( ! username ) return;
+
+					await cosmeticService.equipOnServer( username, vehicleKey, slotId, null );
+					renderInfo( vehicleKey );
+
+				} );
+
+			} );
+
+			// Unequip (slot-level "Retirer" button)
+			document.querySelectorAll( '.cos-unequip' ).forEach( ( btn ) => {
+
+				btn.addEventListener( 'click', async () => {
+
+					const slotId = btn.dataset.slot;
+					const username = profileService.username;
+					if ( ! username ) return;
+
+					await cosmeticService.equipOnServer( username, vehicleKey, slotId, null );
+					renderInfo( vehicleKey );
+
+				} );
+
+			} );
+
+		};
+
+		const renderTabContent = ( key ) => {
+
+			const contentEl = document.getElementById( 'vc-tab-content' );
+			if ( ! contentEl ) return;
+
+			if ( activeTab === 'upgrades' ) {
+
+				contentEl.innerHTML = renderUpgradesSection( key );
+				bindUpgradeButtons( key );
+
+			} else {
+
+				contentEl.innerHTML = renderCosmeticsSection( key );
+				bindCosmeticButtons( key );
+
+			}
+
+		};
+
+		const bindTabs = () => {
+
+			document.querySelectorAll( '.vc-tab' ).forEach( ( tab ) => {
+
+				tab.addEventListener( 'click', () => {
+
+					activeTab = tab.dataset.tab;
+					// Update active tab style
+					document.querySelectorAll( '.vc-tab' ).forEach( ( t ) =>
+						t.classList.toggle( 'vc-tab--active', t.dataset.tab === activeTab )
+					);
+					renderTabContent( keys[ idx ] );
+
+				} );
+
+			} );
+
+		};
+
+		// renderInfo must be declared after bind functions (used inside them)
 		const renderInfo = ( key ) => {
 
 			const display = upgradeService.getDisplayStats( key );
@@ -574,10 +796,15 @@ export class Lobby {
 
 			}
 
-			// Refresh upgrades section in-place
-			const upgradesEl = document.getElementById( 'vc-upgrades' );
-			if ( upgradesEl ) upgradesEl.outerHTML = renderUpgradesSection( key );
-			bindUpgradeButtons( key );
+			// Refresh tab content (upgrades or cosmetics)
+			renderTabContent( key );
+
+			// Update 3D preview with current cosmetics
+			if ( this._carousel ) {
+
+				this._carousel.applyLoadout( cosmeticService.getLoadout( key ) );
+
+			}
 
 		};
 
@@ -590,8 +817,10 @@ export class Lobby {
 
 		};
 
-		// Bind initial upgrade buttons
-		bindUpgradeButtons( key );
+		// Bind initial tab content
+		bindTabs();
+		if ( activeTab === 'upgrades' ) bindUpgradeButtons( key );
+		else bindCosmeticButtons( key );
 
 		document.getElementById( 'vc-btn-back' ).addEventListener( 'click', () => {
 
@@ -889,6 +1118,17 @@ export class Lobby {
 									</div>
 								</div>
 							</div>
+							<div class="room-config-row">
+								<div class="room-config-label">Météo</div>
+								<div class="room-weather-toggle">
+									${ [ 'random', 'clear', 'rain', 'fog', 'storm', 'night' ].map( ( w ) => {
+										const labels = { random: '🎲', clear: '☀️', rain: '🌧️', fog: '🌫️', storm: '⛈️', night: '🌙' };
+										const active  = this.selectedWeather === w ? ' active' : '';
+										const dis     = isHost ? '' : ' disabled';
+										return `<button id="btn-weather-${ w }" class="room-weather-btn${ active }"${ dis } title="${ w }">${ labels[ w ] }</button>`;
+									} ).join( '' ) }
+								</div>
+							</div>
 							${ isHost ? `<button id="btn-start" class="room-start-btn">Démarrer la partie</button>` : `
 							<div class="room-waiting">
 								<div class="room-waiting-dots"><span></span><span></span><span></span></div>
@@ -945,9 +1185,24 @@ export class Lobby {
 
 			} );
 
+			for ( const w of [ 'random', 'clear', 'rain', 'fog', 'storm', 'night' ] ) {
+
+				document.getElementById( `btn-weather-${ w }` ).addEventListener( 'click', () => {
+
+					this.selectedWeather = w;
+					for ( const ww of [ 'random', 'clear', 'rain', 'fog', 'storm', 'night' ] ) {
+
+						document.getElementById( `btn-weather-${ ww }` ).classList.toggle( 'active', ww === w );
+
+					}
+
+				} );
+
+			}
+
 			document.getElementById( 'btn-start' ).addEventListener( 'click', () => {
 
-				if ( this.onStartRace ) this.onStartRace( { mode: this.selectedMode, laps: this.selectedLaps } );
+				if ( this.onStartRace ) this.onStartRace( { mode: this.selectedMode, laps: this.selectedLaps, weather: this.selectedWeather } );
 
 			} );
 

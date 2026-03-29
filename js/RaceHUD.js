@@ -9,6 +9,12 @@ export class RaceHUD {
             <div id="hud-countdown" class="hud-countdown"></div>
             <div id="hud-lap" class="hud-lap"></div>
             <div id="hud-leaderboard" class="hud-leaderboard"></div>
+            <div id="hud-nitro" class="hud-nitro">
+                <div class="hud-nitro-label">NITRO</div>
+                <div class="hud-nitro-track">
+                    <div id="hud-nitro-fill" class="hud-nitro-fill"></div>
+                </div>
+            </div>
             <div id="hud-results" class="hud-results"></div>
         `;
 
@@ -16,6 +22,7 @@ export class RaceHUD {
         this.lapEl = document.getElementById( 'hud-lap' );
         this.leaderboardEl = document.getElementById( 'hud-leaderboard' );
         this.resultsEl = document.getElementById( 'hud-results' );
+        this.nitroFillEl = document.getElementById( 'hud-nitro-fill' );
 
         this.lastCountdown = -1;
         this.mode = 'sandbox';
@@ -281,6 +288,17 @@ export class RaceHUD {
         this.hideResults();
         this.lapEl.textContent = '';
         this.leaderboardEl.innerHTML = '';
+
+    }
+
+    // ─── Nitro gauge ────────────────────────────────────
+
+    updateNitro( gauge, active ) {
+
+        if ( ! this.nitroFillEl ) return;
+        const pct = Math.round( gauge * 100 );
+        this.nitroFillEl.style.width = pct + '%';
+        this.nitroFillEl.classList.toggle( 'nitro-active', active );
 
     }
 

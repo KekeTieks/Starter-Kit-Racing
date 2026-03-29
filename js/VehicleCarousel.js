@@ -6,6 +6,7 @@
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { applyCosmetics, stripCosmetics } from './CosmeticApplicator.js';
 
 const VEHICLE_KEYS = [ 'yellow', 'green', 'purple', 'red' ];
 
@@ -196,9 +197,29 @@ export class VehicleCarousel {
 			this._vehicleGroup = group;
 			this._scene.add( group );
 
+			// Apply pending cosmetic loadout if set
+			if ( this._pendingLoadout ) {
+
+				applyCosmetics( group, this._pendingLoadout );
+
+			}
+
 			if ( this._raf === null ) this._startLoop();
 
 		} );
+
+	}
+
+	/** Apply a cosmetic loadout to the preview model. Can be called before or after load. */
+	applyLoadout( loadout ) {
+
+		this._pendingLoadout = loadout;
+		if ( this._vehicleGroup ) {
+
+			stripCosmetics( this._vehicleGroup );
+			applyCosmetics( this._vehicleGroup, loadout );
+
+		}
 
 	}
 

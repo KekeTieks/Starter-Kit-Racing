@@ -29,10 +29,12 @@ export class Network {
         this.onPhaseChange = null;
         this.onPlayerFinished = null;
         this.onMapChange = null;
+        this.onWeatherChange = null;
 
         this._lastPhase = '';
         this._lastCountdown = -1;
         this._lastMapData = '';
+        this._lastWeather = '';
 
     }
 
@@ -233,6 +235,14 @@ export class Network {
 
         }
 
+        const weather = state.weather || 'clear';
+        if ( weather !== this._lastWeather ) {
+
+            this._lastWeather = weather;
+            if ( this.onWeatherChange ) this.onWeatherChange( weather );
+
+        }
+
     }
 
     sendInput( input ) {
@@ -268,11 +278,11 @@ export class Network {
 
     }
 
-    sendStartRace( mode, laps ) {
+    sendStartRace( mode, laps, weather ) {
 
         if ( this.room ) {
 
-            this.room.send( 'startRace', { mode, laps } );
+            this.room.send( 'startRace', { mode, laps, weather } );
 
         }
 
@@ -339,6 +349,12 @@ export class Network {
     get roomMapData() {
 
         return ( this.room && this.room.state ) ? ( this.room.state.mapData || '' ) : '';
+
+    }
+
+    get roomWeather() {
+
+        return ( this.room && this.room.state ) ? ( this.room.state.weather || 'clear' ) : 'clear';
 
     }
 

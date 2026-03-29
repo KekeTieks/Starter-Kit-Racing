@@ -339,12 +339,12 @@
 		.vc-right {
 			display: flex;
 			flex-direction: column;
-			justify-content: center;
-			gap: 28px;
+			gap: 20px;
 			padding: 40px 36px;
 			background: rgba(0,0,0,0.45);
 			backdrop-filter: blur(20px);
 			border-left: 1px solid rgba(255,255,255,0.06);
+			overflow: hidden;
 		}
 
 		.vc-vehicle-name {
@@ -530,6 +530,138 @@
 			cursor: not-allowed;
 		}
 		.upg-buy-btn--maxed {
+			border-color: rgba(245,200,66,0.5);
+			background: rgba(245,200,66,0.12);
+			color: #f5c842;
+		}
+
+		/* ── Tabs ── */
+		.vc-tabs {
+			display: flex;
+			gap: 0;
+			border-bottom: 1px solid rgba(255,255,255,0.08);
+			margin-bottom: 2px;
+		}
+		.vc-tab {
+			flex: 1;
+			padding: 10px 0;
+			border: none;
+			background: none;
+			color: rgba(255,255,255,0.35);
+			font-size: 10px;
+			font-weight: 700;
+			letter-spacing: 0.1em;
+			text-transform: uppercase;
+			cursor: pointer;
+			transition: color 0.15s, border-color 0.15s;
+			border-bottom: 2px solid transparent;
+		}
+		.vc-tab:hover { color: rgba(255,255,255,0.6); }
+		.vc-tab--active {
+			color: #fff;
+			border-bottom-color: #4a9eff;
+		}
+		.vc-tab-content {
+			flex: 1;
+			overflow-y: auto;
+			min-height: 0;
+		}
+
+		/* ── Cosmetics section ── */
+		.vc-cosmetics-section {
+			display: flex;
+			flex-direction: column;
+			gap: 14px;
+			padding-top: 10px;
+		}
+		.cos-slot {
+			display: flex;
+			flex-direction: column;
+			gap: 6px;
+		}
+		.cos-slot-header {
+			display: flex;
+			align-items: center;
+			gap: 6px;
+			font-size: 11px;
+			font-weight: 700;
+			color: rgba(255,255,255,0.6);
+		}
+		.cos-slot-icon { font-size: 14px; width: 18px; text-align: center; }
+		.cos-slot-name { flex: 1; }
+		.cos-unequip {
+			border: none;
+			background: none;
+			color: rgba(255,100,100,0.6);
+			font-size: 10px;
+			font-weight: 600;
+			cursor: pointer;
+			padding: 2px 6px;
+		}
+		.cos-unequip:hover { color: #ff6b6b; }
+		.cos-items {
+			display: flex;
+			flex-direction: column;
+			gap: 4px;
+			padding-left: 24px;
+		}
+		.cos-item {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 8px;
+			padding: 5px 8px;
+			border-radius: 6px;
+			background: rgba(255,255,255,0.03);
+			transition: background 0.12s;
+		}
+		.cos-item:hover { background: rgba(255,255,255,0.06); }
+		.cos-item--active {
+			background: rgba(74,158,255,0.10);
+			border: 1px solid rgba(74,158,255,0.25);
+		}
+		.cos-item-name {
+			font-size: 11px;
+			color: rgba(255,255,255,0.8);
+			flex: 1;
+			min-width: 0;
+			white-space: nowrap;
+			overflow: hidden;
+			text-overflow: ellipsis;
+		}
+		.cos-btn {
+			flex-shrink: 0;
+			padding: 4px 10px;
+			border: 1px solid rgba(255,255,255,0.15);
+			border-radius: 6px;
+			background: rgba(255,255,255,0.06);
+			color: rgba(255,255,255,0.5);
+			font-size: 10px;
+			font-weight: 600;
+			cursor: pointer;
+			transition: background 0.12s, border-color 0.12s;
+			white-space: nowrap;
+		}
+		.cos-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+		.cos-btn--buy {
+			border-color: rgba(74,158,255,0.5);
+			background: rgba(74,158,255,0.12);
+			color: #4a9eff;
+		}
+		.cos-btn--buy:hover:not(:disabled) {
+			background: rgba(74,158,255,0.25);
+			border-color: #4a9eff;
+		}
+		.cos-btn--equip {
+			border-color: rgba(80,200,120,0.5);
+			background: rgba(80,200,120,0.10);
+			color: #50c878;
+		}
+		.cos-btn--equip:hover:not(:disabled) {
+			background: rgba(80,200,120,0.22);
+			border-color: #50c878;
+		}
+		.cos-btn--equipped {
 			border-color: rgba(245,200,66,0.5);
 			background: rgba(245,200,66,0.12);
 			color: #f5c842;
@@ -1527,6 +1659,29 @@
 		}
 		.room-lap-btn:hover:not(:disabled) { background: rgba(255,255,255,0.15); }
 		.room-lap-btn:disabled { opacity: 0.3; cursor: default; }
+		/* Weather toggle */
+		.room-weather-toggle {
+			display: flex;
+			gap: 4px;
+			background: rgba(0,0,0,0.25);
+			border-radius: 10px;
+			padding: 4px;
+		}
+		.room-weather-btn {
+			flex: 1;
+			padding: 7px 0;
+			border: none;
+			border-radius: 8px;
+			background: transparent;
+			font-size: 18px;
+			cursor: pointer;
+			transition: all 0.15s;
+			line-height: 1;
+		}
+		.room-weather-btn.active {
+			background: rgba(255,255,255,0.14);
+		}
+		.room-weather-btn:disabled { cursor: default; }
 		.room-lap-value {
 			font-size: 20px;
 			font-weight: 800;
@@ -1616,6 +1771,42 @@
 		}
 		.hud-lap-time { opacity: 0.7; }
 		.hud-total-time { opacity: 0.5; font-size: 12px; }
+		/* Nitro gauge */
+		.hud-nitro {
+			position: fixed;
+			bottom: 24px;
+			left: 50%;
+			transform: translateX(-50%);
+			z-index: 15;
+			display: flex;
+			align-items: center;
+			gap: 8px;
+		}
+		.hud-nitro-label {
+			color: #fff;
+			font-size: 12px;
+			font-weight: 700;
+			letter-spacing: 1px;
+			text-shadow: 0 1px 4px rgba(0,0,0,0.6);
+		}
+		.hud-nitro-track {
+			width: 180px;
+			height: 10px;
+			background: rgba(0,0,0,0.45);
+			border-radius: 5px;
+			overflow: hidden;
+		}
+		.hud-nitro-fill {
+			height: 100%;
+			width: 0%;
+			border-radius: 5px;
+			background: linear-gradient(90deg, #00bfff, #00e5ff);
+			transition: width 0.08s linear;
+		}
+		.hud-nitro-fill.nitro-active {
+			background: linear-gradient(90deg, #ff8800, #ffcc00);
+			box-shadow: 0 0 10px rgba(255,170,0,0.7);
+		}
 		.hud-leaderboard {
 			position: fixed;
 			top: 16px;

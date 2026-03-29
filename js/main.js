@@ -8,7 +8,7 @@ import { Camera } from './Camera.js';
 import { Controls } from './Controls.js';
 import { buildTrack, encodeCells, decodeCells, computeSpawnPosition, computeTrackBounds } from './Track.js';
 import { buildWallColliders, createSphereBody, createChassisBody, createKinematicSphereBody, initRayFilter } from './Physics.js';
-import { SmokeTrails } from './Particles.js';
+import { SmokeTrails, NitroFX } from './Particles.js';
 import { Skidmarks } from './Skidmarks.js';
 import { GameAudio } from './Audio.js';
 import { Network } from './Network.js';
@@ -17,6 +17,9 @@ import { RaceHUD } from './RaceHUD.js';
 import { VEHICLE_STATS, USE_ARCADE_VEHICLE } from './VehicleStats.js';
 import { upgradeService } from './UpgradeService.js';
 import { profileService } from './ProfileService.js';
+import { WeatherController } from './Weather.js';
+import { cosmeticService, CosmeticService } from './CosmeticService.js';
+import { GamepadRumble } from './GamepadRumble.js';
 
 
 const renderer = new THREE.WebGLRenderer( { antialias: true, outputBufferType: THREE.HalfFloatType } );
@@ -126,12 +129,14 @@ function setupScene( customCells ) {
 	dirLight.shadow.camera.bottom = - shadowExtent;
 	dirLight.shadow.camera.updateProjectionMatrix();
 
-	scene.fog.near = groundSize * 0.4;
-	scene.fog.far = groundSize * 0.8;
+	const baseFogNear = groundSize * 0.4;
+	const baseFogFar  = groundSize * 0.8;
+	scene.fog.near = baseFogNear;
+	scene.fog.far  = baseFogFar;
 
 	const trackObjects = buildTrack( scene, models, customCells );
 
-	return { bounds, trackObjects };
+	return { bounds, trackObjects, baseFogNear, baseFogFar };
 
 }
 
@@ -141,8 +146,16 @@ function initSinglePlayer( customCells, spawn, vehicleKey ) {
 
 	renderer.domElement.classList.remove( 'hidden' );
 
-	const { bounds } = setupScene( customCells );
+	const { bounds, baseFogNear, baseFogFar } = setupScene( customCells );
 	const groundSize = Math.max( bounds.halfWidth, bounds.halfDepth ) * 2 + 20;
+
+	const _spWeathers = [ 'clear', 'clear', 'clear', 'rain', 'fog', 'storm' ];
+	const _spWeatherType = _spWeathers[ Math.floor( Math.random() * _spWeathers.length ) ];
+	const weather = new WeatherController( {
+		scene, fog: scene.fog, dirLight, hemiLight, bloomPass,
+		baseFogNear, baseFogFar, trackCells: customCells,
+	} );
+	weather.setWeather( _spWeatherType );
 
 	registerAll();
 
@@ -201,6 +214,10 @@ function initSinglePlayer( customCells, spawn, vehicleKey ) {
 	}
 
 	const vehicleGroup = vehicle.init( models[ COLOR_TO_MODEL[ vKey ] || 'vehicle-truck-yellow' ], vStats );
+	vehicle.weatherType = _spWeatherType;
+	vehicle.addHeadlights();
+	vehicle.setHeadlights( _spWeatherType === 'night' );
+	vehicle.applyLoadout( cosmeticService.getLoadout( vKey ) );
 	scene.add( vehicleGroup );
 
 	dirLight.target = vehicleGroup;
@@ -210,10 +227,23 @@ function initSinglePlayer( customCells, spawn, vehicleKey ) {
 
 	const controls = new Controls();
 	const particles = new SmokeTrails( scene );
+	const nitroFX = new NitroFX( scene );
 	const skidmarks = new Skidmarks( scene );
 
 	const audio = new GameAudio();
 	audio.init( cam.camera );
+
+	const rumble = new GamepadRumble();
+
+	const hud = new RaceHUD();
+
+	// Touche L : toggle manuel des phares
+	const _spHeadlightHandler = ( e ) => {
+
+		if ( e.code === 'KeyL' ) vehicle.setHeadlights( ! vehicle.headlightsOn );
+
+	};
+	window.addEventListener( 'keydown', _spHeadlightHandler );
 
 	const _forward = new THREE.Vector3();
 
@@ -223,16 +253,43 @@ function initSinglePlayer( customCells, spawn, vehicleKey ) {
 			if ( bodyA !== sphereBody && bodyB !== sphereBody ) return;
 
 			const vel = sphereBody.motionProperties.linearVelocity;
-			const impactVelocity = Math.sqrt( vel[ 0 ] * vel[ 0 ] + vel[ 2 ] * vel[ 2 ] );
-			audio.playImpact( impactVelocity );
+			const speed = Math.sqrt( vel[ 0 ] * vel[ 0 ] + vel[ 2 ] * vel[ 2 ] );
+			audio.playImpact( speed );
+			rumble.collision( speed / 15 );
 
-			// Speed penalty: reduce rigid body velocity on wall hit
-			if ( impactVelocity > 1 ) {
+			if ( speed > 0.5 ) {
 
-				const keep = Math.max( 0.4, 1 - impactVelocity * 0.08 );
-				rigidBody.setLinearVelocity( world, sphereBody, [
-					vel[ 0 ] * keep, vel[ 1 ], vel[ 2 ] * keep
-				] );
+				// Approximate wall normal from body positions
+				const wallBody = bodyA === sphereBody ? bodyB : bodyA;
+				const sp = sphereBody.position, wp = wallBody.position;
+				let nx = sp[ 0 ] - wp[ 0 ], nz = sp[ 2 ] - wp[ 2 ];
+				const nLen = Math.sqrt( nx * nx + nz * nz );
+				if ( nLen > 0.001 ) { nx /= nLen; nz /= nLen; } else { nx = 0; nz = 1; }
+
+				// Decompose velocity: normal (into wall) and tangential (along wall)
+				const vDotN = vel[ 0 ] * nx + vel[ 2 ] * nz;
+
+				// Only penalize if moving toward the wall
+				if ( vDotN < 0 ) {
+
+					// Bounce: reflect normal component, scaled down
+					const bounceRestitution = 0.3;
+					const newVn = - vDotN * bounceRestitution;
+
+					// Friction along wall: lose some tangential speed on impact
+					const tangentFriction = Math.max( 0.85, 1 - Math.abs( vDotN ) * 0.03 );
+
+					// Tangential components
+					const tx = vel[ 0 ] - vDotN * nx;
+					const tz = vel[ 2 ] - vDotN * nz;
+
+					rigidBody.setLinearVelocity( world, sphereBody, [
+						tx * tangentFriction + nx * newVn,
+						vel[ 1 ],
+						tz * tangentFriction + nz * newVn
+					] );
+
+				}
 
 			}
 
@@ -263,8 +320,20 @@ function initSinglePlayer( customCells, spawn, vehicleKey ) {
 
 		cam.update( dt, vehicle.spherePos );
 		particles.update( dt, vehicle );
+		nitroFX.update( dt, vehicle );
 		skidmarks.update( dt, vehicle );
 		audio.update( dt, vehicle.linearSpeed, input.z, vehicle.driftIntensity );
+		vehicle.updateBrakeLights( dt, input );
+		hud.updateNitro( vehicle.nitroGauge, vehicle.nitroActive );
+
+		// Gamepad rumble: continuous state + nitro burst
+		if ( vehicle.nitroActive && ! rumble._prevNitro ) rumble.nitroStart();
+		rumble._prevNitro = vehicle.nitroActive;
+		const topSpeed = vStats.maxSpeed * 10 * ( vehicle.nitroActive ? 1.25 : 1 );
+		rumble.setContinuous( vehicle.driftIntensity, Math.abs( vehicle.linearSpeed ) / topSpeed, vehicle.nitroActive, Math.max( 0, input.z ), Math.max( 0, - input.z ) );
+		rumble.update();
+
+		weather.update( dt, cam.camera.position );
 
 		renderer.render( scene, cam.camera );
 
@@ -280,7 +349,12 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 
 	renderer.domElement.classList.remove( 'hidden' );
 
-	const { bounds, trackObjects } = setupScene( customCells );
+	const { bounds, trackObjects, baseFogNear, baseFogFar } = setupScene( customCells );
+
+	const weather = new WeatherController( {
+		scene, fog: scene.fog, dirLight, hemiLight, bloomPass,
+		baseFogNear, baseFogFar, trackCells: customCells,
+	} );
 
 	const vKey = vehicleKey || 'yellow';
 	const vStats = VEHICLE_STATS[ vKey ] || VEHICLE_STATS.yellow;
@@ -292,10 +366,13 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 	const cam = new Camera();
 	const controls = new Controls();
 	const particles = new SmokeTrails( scene );
+	const nitroFX = new NitroFX( scene );
 	const skidmarks = new Skidmarks( scene );
 
 	const audio = new GameAudio();
 	audio.init( cam.camera );
+
+	const rumble = new GamepadRumble();
 
 	const hud = new RaceHUD();
 
@@ -360,6 +437,7 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 			const vel = localSphereBody.motionProperties.linearVelocity;
 			const impactVelocity = Math.sqrt( vel[ 0 ] * vel[ 0 ] + vel[ 2 ] * vel[ 2 ] );
 			audio.playImpact( impactVelocity );
+			rumble.collision( impactVelocity / 15 );
 
 			// In multiplayer, the server is authoritative for speed penalties — only play sound locally.
 			// Slow down reconciliation for a few frames so physics can settle after the impact
@@ -408,6 +486,9 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 			}
 
 			const vehicleGroup = vehicle.init( models[ modelName ], vStats );
+			vehicle.addHeadlights();
+			vehicle.setHeadlights( weather.isNight );
+			vehicle.applyLoadout( cosmeticService.getLoadout( vKey ) );
 			scene.add( vehicleGroup );
 			dirLight.target = vehicleGroup;
 			cam.targetPosition.copy( vehicle.spherePos );
@@ -418,6 +499,17 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 			if ( remoteVehicles.has( sessionId ) ) return;
 			const remote = new RemoteVehicle();
 			const group = remote.init( models[ modelName ] );
+			remote.addHeadlights();
+			remote.setHeadlights( weather.isNight );
+
+			// Apply remote player's cosmetics if available
+			const remoteState = network.getPlayerState( sessionId );
+			if ( remoteState?.cosmetics ) {
+
+				remote.applyLoadout( CosmeticService.deserializeLoadout( remoteState.cosmetics ) );
+
+			}
+
 			scene.add( group );
 			remoteVehicles.set( sessionId, remote );
 			remoteParticles.set( sessionId, new SmokeTrails( scene ) );
@@ -487,9 +579,9 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 			lobby.showRoom( network.roomId, isHost, network.roomCode );
 			updateLobbyPlayers( network, lobby );
 
-			lobby.onStartRace = ( { mode, laps } ) => {
+			lobby.onStartRace = ( { mode, laps, weather } ) => {
 
-				network.sendStartRace( mode, laps );
+				network.sendStartRace( mode, laps, weather );
 
 			};
 
@@ -508,6 +600,37 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 		}, 280 );
 
 	}
+
+	// Helper: apply headlight state to all spawned vehicles
+	function _syncHeadlights( on ) {
+
+		vehicle.setHeadlights( on );
+		for ( const remote of remoteVehicles.values() ) remote.setHeadlights( on );
+
+	}
+
+	// Weather sync from server
+	network.onWeatherChange = ( w ) => {
+
+		weather.setWeather( w );
+		vehicle.weatherType = w;
+		_syncHeadlights( w === 'night' );
+
+	};
+
+	// Apply initial weather if already set (e.g. rejoining a room)
+	const _initialWeather = network.roomWeather;
+	weather.setWeather( _initialWeather );
+	vehicle.weatherType = _initialWeather;
+	_syncHeadlights( _initialWeather === 'night' );
+
+	// Touche L : toggle manuel des phares
+	const _mpHeadlightHandler = ( e ) => {
+
+		if ( e.code === 'KeyL' ) vehicle.setHeadlights( ! vehicle.headlightsOn );
+
+	};
+	window.addEventListener( 'keydown', _mpHeadlightHandler );
 
 	// Apply rewards when the server confirms them
 	network.onRaceReward = ( data ) => {
@@ -579,6 +702,7 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 
 		// Dispose particles and skidmarks
 		particles.dispose( scene );
+		nitroFX.dispose( scene );
 		skidmarks.dispose( scene );
 
 		// Remove local vehicle from scene
@@ -590,6 +714,12 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 
 		// Reset dirLight target to avoid dangling reference
 		dirLight.target = dirLight; // self-target = no effect
+
+		// Restore day sky (in case night mode was active)
+		scene.background = new THREE.Color( 0xadb2ba );
+
+		// Cleanup headlight key listener
+		window.removeEventListener( 'keydown', _mpHeadlightHandler );
 
 		// Hide the canvas — the lobby is pure DOM, no need for a stale game frame behind it
 		renderer.domElement.classList.add( 'hidden' );
@@ -675,11 +805,21 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 
 			cam.update( dt, vehicle.spherePos );
 			particles.update( dt, vehicle );
+			nitroFX.update( dt, vehicle );
 			skidmarks.update( dt, vehicle );
 			audio.update( dt, vehicle.linearSpeed, input.z, vehicle.driftIntensity );
+			vehicle.updateBrakeLights( dt, input );
 
 			hud.updateLapDisplay( myState, network.totalLaps );
 			hud.updateLeaderboard( network.playerStates, network.totalLaps );
+			hud.updateNitro( vehicle.nitroGauge, vehicle.nitroActive );
+
+			// Gamepad rumble: continuous state + nitro burst
+			if ( vehicle.nitroActive && ! rumble._prevNitro ) rumble.nitroStart();
+			rumble._prevNitro = vehicle.nitroActive;
+			const topSpeed = vStats.maxSpeed * 10 * ( vehicle.nitroActive ? 1.25 : 1 );
+			rumble.setContinuous( vehicle.driftIntensity, Math.abs( vehicle.linearSpeed ) / topSpeed, vehicle.nitroActive, Math.max( 0, input.z ), Math.max( 0, - input.z ) );
+			rumble.update();
 
 		}
 
@@ -702,6 +842,8 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 			}
 
 		}
+
+		weather.update( dt, cam.camera.position );
 
 		renderer.render( scene, cam.camera );
 
@@ -853,7 +995,7 @@ async function init() {
 	// Wire up all lobby ↔ network callbacks once the room lobby is shown
 	function setupLobbyCallbacks( vehicleKey ) {
 
-		lobby.onStartRace = ( { mode, laps } ) => network.sendStartRace( mode, laps );
+		lobby.onStartRace = ( { mode, laps, weather } ) => network.sendStartRace( mode, laps, weather );
 
 		lobby.onLeaveRoom = () => {
 

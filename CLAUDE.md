@@ -4,15 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-A JavaScript/Three.js racing game ported from [Kenney's Starter Kit Racing](https://github.com/KenneyNL/Starter-Kit-Racing) (Godot 4.6). Uses [crashcat](https://github.com/isaac-mason/crashcat) for physics. No build step — pure ES modules loaded via import maps from CDN.
+A JavaScript/Three.js racing game ported from [Kenney's Starter Kit Racing](https://github.com/KenneyNL/Starter-Kit-Racing) (Godot 4.6). Uses [crashcat](https://github.com/isaac-mason/crashcat) for physics. Built with Vite — all dependencies (Three.js, crashcat, Colyseus SDK, etc.) are npm packages.
 
 ## Running Locally
 
-Serve the root directory with any static HTTP server (import maps require it):
 ```bash
-npx serve .
-# or
-python -m http.server
+npm install
+npm run dev
 ```
 Open `index.html` to play, `editor.html` for the track editor. Custom tracks are passed via `?map=<base64url>` query param.
 

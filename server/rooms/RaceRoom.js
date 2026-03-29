@@ -77,6 +77,11 @@ export class RaceRoom extends Room {
         this.state.roomCode = this.roomCode;
         console.log( `Room ${ this.roomId } registered with code ${ this.roomCode }` );
 
+        // Weather: fixed for the entire race, chosen at room creation
+        const WEATHER_OPTIONS = [ 'clear', 'clear', 'clear', 'rain', 'fog', 'storm' ];
+        this.state.weather = options.weather || WEATHER_OPTIONS[ Math.floor( Math.random() * WEATHER_OPTIONS.length ) ];
+        console.log( `Room ${ this.roomId } weather: ${ this.state.weather }` );
+
         this.trackCells = mapData ? decodeCells( mapData ) : DEFAULT_CELLS;
         this.world = initPhysics( this.trackCells );
         this._rayFilter = USE_ARCADE_VEHICLE ? initRayFilter( this.world ) : null;
@@ -111,13 +116,37 @@ export class RaceRoom extends Room {
 
                         }
 
-                        // Server-authoritative speed penalty: reduce rigid body velocity
-                        if ( speed > 1 ) {
+                        // Server-authoritative wall collision with proper reflection
+                        if ( speed > 0.5 ) {
 
-                            const keep = Math.max( 0.4, 1 - speed * 0.08 );
-                            rigidBody.setLinearVelocity( this.world, sim.body, [
-                                vel[ 0 ] * keep, vel[ 1 ], vel[ 2 ] * keep
-                            ] );
+                            // Approximate wall normal from body positions
+                            const wallBody = bodyA === sim.body ? bodyB : bodyA;
+                            const sp = sim.body.position, wp = wallBody.position;
+                            let nx = sp[ 0 ] - wp[ 0 ], nz = sp[ 2 ] - wp[ 2 ];
+                            const nLen = Math.sqrt( nx * nx + nz * nz );
+                            if ( nLen > 0.001 ) { nx /= nLen; nz /= nLen; } else { nx = 0; nz = 1; }
+
+                            // Decompose velocity into normal and tangential
+                            const vDotN = vel[ 0 ] * nx + vel[ 2 ] * nz;
+
+                            // Only penalize if moving toward the wall
+                            if ( vDotN < 0 ) {
+
+                                const bounceRestitution = 0.3;
+                                const newVn = - vDotN * bounceRestitution;
+
+                                const tangentFriction = Math.max( 0.85, 1 - Math.abs( vDotN ) * 0.03 );
+
+                                const tx = vel[ 0 ] - vDotN * nx;
+                                const tz = vel[ 2 ] - vDotN * nz;
+
+                                rigidBody.setLinearVelocity( this.world, sim.body, [
+                                    tx * tangentFriction + nx * newVn,
+                                    vel[ 1 ],
+                                    tz * tangentFriction + nz * newVn
+                                ] );
+
+                            }
 
                         }
 
@@ -171,6 +200,29 @@ export class RaceRoom extends Room {
 
             if ( this.state.phase !== 'waiting' ) return;
             if ( client.sessionId !== this.hostSessionId ) return;
+
+            // Apply weather choice: specific type or 'random'
+            const VALID_WEATHERS = [ 'clear', 'rain', 'fog', 'storm', 'night' ];
+            const WEATHER_OPTIONS = [ 'clear', 'clear', 'clear', 'rain', 'fog', 'storm' ];
+            if ( data && data.weather && VALID_WEATHERS.includes( data.weather ) ) {
+
+                this.state.weather = data.weather;
+
+            } else {
+
+                // 'random' or missing — pick a new random weather
+                this.state.weather = WEATHER_OPTIONS[ Math.floor( Math.random() * WEATHER_OPTIONS.length ) ];
+
+            }
+
+            // Propagate updated weather to all active sims
+            for ( const sim of this.sims.values() ) {
+
+                sim.weatherType = this.state.weather;
+
+            }
+
+            console.log( `Room ${ this.roomId } weather at startRace: ${ this.state.weather }` );
 
             const mode = data && data.mode === 'sandbox' ? 'sandbox' : 'race';
             this.state.mode = mode;
@@ -332,6 +384,7 @@ export class RaceRoom extends Room {
         if ( this._rayFilter ) sim._rayFilter = this._rayFilter;
         sim.spawnPos = [ ...spawn.position ];
         sim.spawnAngle = spawn.angle;
+        sim.weatherType = this.state.weather;
         this.sims.set( client.sessionId, sim );
 
         const player = new PlayerState();

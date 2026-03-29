@@ -3,6 +3,16 @@
 
 const EPSILON = 0.001;
 
+// ── Weather physics multipliers ──────────────────────────────────────
+// Keep in sync with server/simulation/VehicleSim.js
+
+export const WEATHER_PHYSICS = {
+	clear: { gripMultiplier: 1.0,  dragMultiplier: 1.0 },
+	rain:  { gripMultiplier: 0.7,  dragMultiplier: 1.3 },
+	fog:   { gripMultiplier: 1.0,  dragMultiplier: 1.0 },
+	storm: { gripMultiplier: 0.55, dragMultiplier: 1.5 },
+};
+
 // ── vec3 helpers (zero-allocation) ──────────────────────────────────
 
 function v3Set( out, x, y, z ) { out[ 0 ] = x; out[ 1 ] = y; out[ 2 ] = z; return out; }
@@ -79,6 +89,7 @@ export class ArcadeVehicle {
 		this.drifting = false;
 		this.currentRearGrip = config.gripRear;
 		this.driftIntensity = 0;
+		this.weatherType = 'clear';
 
 		// Pre-allocated output buffers (no GC per frame)
 		this._forces = [];
@@ -134,6 +145,11 @@ export class ArcadeVehicle {
 		this._forceCount = 0;
 		this._torqueCount = 0;
 
+		// ── Weather multipliers ──────────────────────────────────
+		const _wm = WEATHER_PHYSICS[ this.weatherType ] ?? WEATHER_PHYSICS.clear;
+		const _effectiveGrip = _wm.gripMultiplier;
+		const _effectiveDrag = _wm.dragMultiplier;
+
 		// ── Chassis axes ─────────────────────────────────────────
 
 		v3ApplyQuat( this._forward, [ 0, 0, 1 ], chassis.quaternion );
@@ -143,7 +159,8 @@ export class ArcadeVehicle {
 		const speed = chassis.linearVelocity[ 0 ] * this._forward[ 0 ]
 			+ chassis.linearVelocity[ 2 ] * this._forward[ 2 ];
 		const absSpeed = Math.abs( speed );
-		const topSpeed = cfg.maxSpeed * 10;
+		const nitro = input.nitroMult || 1;
+		const topSpeed = cfg.maxSpeed * 10 * ( nitro > 1 ? 1.25 : 1 );
 		const speedFraction = clamp( absSpeed / topSpeed, 0, 1 );
 
 		const cx = chassis.position[ 0 ], cy = chassis.position[ 1 ], cz = chassis.position[ 2 ];
@@ -223,11 +240,12 @@ export class ArcadeVehicle {
 
 			const fwd0 = this._forward[ 0 ], fwd2 = this._forward[ 2 ];
 
-			// Engine
+			// Engine (with optional nitro multiplier)
 			if ( input.throttle > 0 ) {
 
+				const nitro = input.nitroMult || 1;
 				const torqueCurve = 1 - speedFraction * 0.7;
-				const engineF = input.throttle * cfg.engineForce * torqueCurve;
+				const engineF = input.throttle * cfg.engineForce * torqueCurve * nitro;
 				this._pushForce( fwd0 * engineF, 0, fwd2 * engineF, cx, cy, cz );
 
 			}
@@ -274,7 +292,7 @@ export class ArcadeVehicle {
 			const velXZLen = Math.sqrt( vx * vx + vz * vz );
 			if ( velXZLen > EPSILON ) {
 
-				const dragF = velXZLen * velXZLen * cfg.dragCoefficient + cfg.rollingResistance;
+				const dragF = velXZLen * velXZLen * cfg.dragCoefficient * _effectiveDrag + cfg.rollingResistance;
 				const inv = 1 / velXZLen;
 				this._pushForce( - vx * inv * dragF, 0, - vz * inv * dragF, cx, cy, cz );
 
@@ -374,7 +392,7 @@ export class ArcadeVehicle {
 
 			}
 
-			const gripStrength = this.drifting ? this.currentRearGrip : cfg.gripFront;
+			const gripStrength = ( this.drifting ? this.currentRearGrip : cfg.gripFront ) * _effectiveGrip;
 			const latForce = - latSpeed * gripStrength * cfg.mass;
 			this._pushForce( this._right[ 0 ] * latForce, 0, this._right[ 2 ] * latForce, cx, cy, cz );
 

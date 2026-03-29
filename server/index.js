@@ -8,6 +8,7 @@ import { migrate } from './db/migrate.js';
 import authRouter    from './routes/auth.js';
 import profileRouter from './routes/profile.js';
 import upgradesRouter from './routes/upgrades.js';
+import cosmeticsRouter from './routes/cosmetics.js';
 
 const __dirname = path.dirname( fileURLToPath( import.meta.url ) );
 const port = parseInt( process.env.PORT || '2567' );
@@ -35,6 +36,7 @@ const server = defineServer( {
         app.use( '/api/auth',     authRouter );
         app.use( '/api/profile',  profileRouter );
         app.use( '/api/upgrades', upgradesRouter );
+        app.use( '/api/cosmetics', cosmeticsRouter );
 
         // ── Room code resolution ─────────────────────────────────────────────
         app.get( '/api/room-code/:code', ( req, res ) => {

@@ -7,6 +7,7 @@ import { resolveRoomCode } from './RoomCodeRegistry.js';
 import { migrate } from './db/migrate.js';
 import authRouter    from './routes/auth.js';
 import profileRouter from './routes/profile.js';
+import upgradesRouter from './routes/upgrades.js';
 
 const __dirname = path.dirname( fileURLToPath( import.meta.url ) );
 const port = parseInt( process.env.PORT || '2567' );
@@ -31,8 +32,9 @@ const server = defineServer( {
         app.use( express.json() );
 
         // ── Auth ────────────────────────────────────────────────────────────
-        app.use( '/api/auth',    authRouter );
-        app.use( '/api/profile', profileRouter );
+        app.use( '/api/auth',     authRouter );
+        app.use( '/api/profile',  profileRouter );
+        app.use( '/api/upgrades', upgradesRouter );
 
         // ── Room code resolution ─────────────────────────────────────────────
         app.get( '/api/room-code/:code', ( req, res ) => {

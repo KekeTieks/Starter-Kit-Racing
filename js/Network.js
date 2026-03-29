@@ -35,7 +35,7 @@ export class Network {
 
     }
 
-    async connect( serverUrl, mapData, roomId, username, vehicle ) {
+    async connect( serverUrl, mapData, roomId, username, vehicle, upgrades = {} ) {
 
         // Rewrite all Colyseus-generated URLs to go through the current origin
         // (Vite proxy in dev, same-origin in prod). Preserve http/https for REST,
@@ -52,9 +52,10 @@ export class Network {
         this.client = new Client( serverUrl, { urlBuilder } );
 
         const options = {};
-        if ( mapData ) options.map = mapData;
+        if ( mapData )  options.map      = mapData;
         if ( username ) options.username = username;
         if ( vehicle )  options.vehicle  = vehicle;
+        if ( upgrades && Object.keys( upgrades ).length > 0 ) options.upgrades = upgrades;
 
         if ( roomId ) {
 
@@ -98,6 +99,12 @@ export class Network {
         this.room.onMessage( 'playerFinished', ( data ) => {
 
             if ( this.onPlayerFinished ) this.onPlayerFinished( data );
+
+        } );
+
+        this.room.onMessage( 'raceReward', ( data ) => {
+
+            if ( this.onRaceReward ) this.onRaceReward( data );
 
         } );
 
@@ -338,7 +345,7 @@ export class Network {
 
     }
 
-    async joinByCode( serverUrl, code, username, vehicle ) {
+    async joinByCode( serverUrl, code, username, vehicle, upgrades = {} ) {
 
         const res = await fetch( `${ serverUrl }/api/room-code/${ encodeURIComponent( code ) }` );
 
@@ -349,7 +356,7 @@ export class Network {
         }
 
         const { roomId } = await res.json();
-        await this.connect( serverUrl, '', roomId, username, vehicle );
+        await this.connect( serverUrl, '', roomId, username, vehicle, upgrades );
 
     }
 

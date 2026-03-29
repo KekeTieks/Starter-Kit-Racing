@@ -284,6 +284,28 @@ export class RaceHUD {
 
     }
 
+    showRewardToast( xpEarned, creditsEarned ) {
+
+        const toast = document.createElement( 'div' );
+        toast.className = 'hud-reward-toast';
+        toast.innerHTML = `<span>+${ xpEarned } XP</span><span>+${ creditsEarned } credits</span>`;
+        document.body.appendChild( toast );
+
+        gsap.fromTo( toast,
+            { opacity: 0, y: 20 },
+            {
+                opacity: 1, y: 0, duration: 0.4, ease: 'power3.out',
+                onComplete: () => {
+                    gsap.to( toast, {
+                        opacity: 0, y: -16, delay: 2.5, duration: 0.4,
+                        onComplete: () => toast.remove(),
+                    } );
+                },
+            }
+        );
+
+    }
+
 }
 
 function formatTime( ms ) {

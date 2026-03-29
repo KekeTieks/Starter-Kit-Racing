@@ -141,6 +141,21 @@ class ProfileService {
 
     }
 
+    /**
+     * Deduct credits locally after a confirmed server purchase.
+     * Call this with the newCredits value returned by /api/upgrades/purchase.
+     */
+    applyCredits( newCredits ) {
+
+        if ( this._profile ) {
+
+            this._profile.credits = newCredits;
+            this._save();
+
+        }
+
+    }
+
     logout() {
 
         this._profile = null;

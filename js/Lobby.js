@@ -3,6 +3,8 @@ import { loadCircuits, generateMinimap, deleteCircuit } from './CircuitLibrary.j
 import { VehicleCarousel, VEHICLE_KEYS } from './VehicleCarousel.js';
 import { gsap } from 'gsap';
 import { profileService } from './ProfileService.js';
+import { upgradeService } from './UpgradeService.js';
+import { UPGRADE_CONFIG, MAX_UPGRADE_LEVEL } from './UpgradeConfig.js';
 
 const LS_USERNAME = 'racing_username';
 const LS_VEHICLE  = 'racing_vehicle';
@@ -67,8 +69,9 @@ export class Lobby {
 
 	// ─── Public accessors ────────────────────────────────────────────────────
 
-	getUsername() { return this.selectedUsername; }
-	getVehicle()  { return this.selectedVehicle; }
+	getUsername()      { return this.selectedUsername; }
+	getVehicle()       { return this.selectedVehicle; }
+	getUpgrades()      { return upgradeService.getVehicleUpgrades( this.selectedVehicle ); }
 	getSelectedCells() { return this.selectedCells; }
 
 	// ─── Screen transition helper ────────────────────────────────────────────
@@ -129,11 +132,11 @@ export class Lobby {
 
 	_buildIdentityScreen() {
 
-		// If already logged in, skip straight to mode screen
+		// If already logged in, skip straight to mode screen (refresh profile first)
 		if ( profileService.isLoggedIn() ) {
 
 			this.selectedUsername = profileService.username;
-			this._buildModeScreen();
+			profileService.refresh().then( () => this._buildModeScreen() );
 			return;
 
 		}
@@ -200,6 +203,10 @@ export class Lobby {
 
 			this.selectedUsername = profileService.username;
 			localStorage.setItem( LS_USERNAME, this.selectedUsername );
+
+			// Load upgrades from server in background (non-blocking)
+			upgradeService.loadFromServer( this.selectedUsername );
+
 			this._transition( () => this._buildModeScreen() );
 
 		} );
@@ -344,7 +351,7 @@ export class Lobby {
 		document.getElementById( 'btn-vehicle' ).addEventListener( 'click', () => {
 
 			this.container.classList.remove( 'ms-fullscreen' );
-			this._transition( () => this._buildVehicleCarouselScreen() );
+			profileService.refresh().then( () => this._transition( () => this._buildVehicleCarouselScreen() ) );
 
 		} );
 
@@ -397,46 +404,62 @@ export class Lobby {
 		let   idx      = keys.indexOf( this.selectedVehicle );
 		if ( idx < 0 ) idx = 0;
 
-		const statRow = ( label, val ) => `
+		const statRow = ( label, val, max = 5 ) => `
 			<div class="vc-stat-row">
 				<div class="vc-stat-header">
 					<span class="vc-stat-label">${ label }</span>
-					<span class="vc-stat-val">${ val }/5</span>
+					<span class="vc-stat-val">${ val }/${ max }</span>
 				</div>
 				<div class="vc-stat-track">
-					<div class="vc-stat-fill" style="width:${ ( val / 5 ) * 100 }%"></div>
+					<div class="vc-stat-fill" style="width:${ Math.min( ( val / max ) * 100, 100 ) }%"></div>
 				</div>
 			</div>`;
 
-		const renderInfo = ( key ) => {
+		const renderUpgradesSection = ( key ) => {
 
-			const stats = VEHICLE_STATS[ key ];
-			const nameEl  = document.getElementById( 'vc-name' );
-			const statsEl = document.getElementById( 'vc-stats' );
-			const dotsEl  = document.getElementById( 'vc-dots' );
+			const credits = profileService.credits;
+			const rows = UPGRADE_CONFIG.map( ( def ) => {
 
-			if ( nameEl )  nameEl.textContent = VEHICLE_NAMES[ key ];
-			if ( statsEl ) statsEl.innerHTML  =
-				statRow( 'Vitesse',       stats.display.speed ) +
-				statRow( 'Maniabilité',   stats.display.handling ) +
-				statRow( 'Accélération',  stats.display.acceleration );
+				const level    = upgradeService.getLevel( key, def.id );
+				const maxed    = level >= MAX_UPGRADE_LEVEL;
+				const cost     = maxed ? null : def.levels[ level ].cost;
+				const canAfford = cost !== null && credits >= cost;
 
-			if ( dotsEl ) {
+				const pips = Array.from( { length: MAX_UPGRADE_LEVEL }, ( _, i ) =>
+					`<span class="upg-pip${ i < level ? ' filled' : '' }"></span>`
+				).join( '' );
 
-				dotsEl.querySelectorAll( '.vc-dot' ).forEach( ( d, i ) => {
+				const btnLabel = maxed ? 'MAX' : `${ cost } cr`;
+				const btnDisabled = maxed || ! canAfford ? 'disabled' : '';
 
-					const active = i === idx;
-					d.classList.toggle( 'active', active );
-					d.style.background = active ? COLOR_HEX[ keys[ i ] ] : '';
+				return `
+					<div class="upg-row" data-upgrade="${ escHtml( def.id ) }">
+						<span class="upg-icon">${ def.icon }</span>
+						<div class="upg-info">
+							<div class="upg-name-line">
+								<span class="upg-name">${ escHtml( def.name ) }</span>
+								<span class="upg-level">${ level }/${ MAX_UPGRADE_LEVEL }</span>
+							</div>
+							<div class="upg-pips">${ pips }</div>
+						</div>
+						<button class="upg-buy-btn${ maxed ? ' upg-buy-btn--maxed' : '' }" data-id="${ escHtml( def.id ) }" ${ btnDisabled }>${ btnLabel }</button>
+					</div>`;
 
-				} );
+			} ).join( '' );
 
-			}
+			return `
+				<div class="vc-upgrades-section" id="vc-upgrades">
+					<div class="upg-header">
+						<span>AMÉLIORATIONS</span>
+						<span class="upg-credits" id="upg-credits">${ credits } cr</span>
+					</div>
+					${ rows }
+				</div>`;
 
 		};
 
-		const key   = keys[ idx ];
-		const stats = VEHICLE_STATS[ key ];
+		const key     = keys[ idx ];
+		const display = upgradeService.getDisplayStats( key );
 
 		this.container.innerHTML = `
 			<div class="vc-screen">
@@ -463,16 +486,17 @@ export class Lobby {
 				</div>
 
 				<!-- Right: info panel -->
-				<div class="vc-right">
+				<div class="vc-right" id="vc-right">
 					<div>
 						<div class="vc-vehicle-name" id="vc-name">${ VEHICLE_NAMES[ key ] }</div>
 						<div class="vc-divider"></div>
 					</div>
 					<div class="vc-stats" id="vc-stats">
-						${ statRow( 'Vitesse',      stats.display.speed ) }
-						${ statRow( 'Maniabilité',  stats.display.handling ) }
-						${ statRow( 'Accélération', stats.display.acceleration ) }
+						${ statRow( 'Vitesse',      +display.speed.toFixed( 1 ), 7 ) }
+						${ statRow( 'Maniabilité',  +display.handling.toFixed( 1 ), 7 ) }
+						${ statRow( 'Accélération', +display.acceleration.toFixed( 1 ), 7 ) }
 					</div>
+					${ renderUpgradesSection( key ) }
 					<button id="vc-btn-select" class="vc-select-btn">
 						Choisir ce véhicule
 					</button>
@@ -484,6 +508,79 @@ export class Lobby {
 		const wrap = document.getElementById( 'vc-canvas-wrap' );
 		this._carousel = new VehicleCarousel( wrap, key );
 
+		// Bind upgrade purchase buttons for a given vehicle key
+		const bindUpgradeButtons = ( vehicleKey ) => {
+
+			document.querySelectorAll( '.upg-buy-btn:not([disabled])' ).forEach( ( btn ) => {
+
+				btn.addEventListener( 'click', async () => {
+
+					const upgradeId = btn.dataset.id;
+					btn.disabled = true;
+					btn.textContent = '…';
+
+					const username = profileService.username;
+					if ( ! username ) {
+						btn.disabled = false;
+						btn.textContent = 'Non connecté';
+						return;
+					}
+
+					const result = await upgradeService.purchase( username, vehicleKey, upgradeId );
+
+					if ( result.ok ) {
+
+						profileService.applyCredits( result.newCredits );
+
+					} else {
+
+						// Show error briefly before re-render
+						btn.textContent = result.error || 'Erreur';
+						await new Promise( ( r ) => setTimeout( r, 1200 ) );
+
+					}
+
+					renderInfo( vehicleKey );
+
+				} );
+
+			} );
+
+		};
+
+		// renderInfo must be declared after bindUpgradeButtons (used inside it)
+		const renderInfo = ( key ) => {
+
+			const display = upgradeService.getDisplayStats( key );
+			const nameEl  = document.getElementById( 'vc-name' );
+			const statsEl = document.getElementById( 'vc-stats' );
+			const dotsEl  = document.getElementById( 'vc-dots' );
+
+			if ( nameEl )  nameEl.textContent = VEHICLE_NAMES[ key ];
+			if ( statsEl ) statsEl.innerHTML  =
+				statRow( 'Vitesse',       +display.speed.toFixed( 1 ), 7 ) +
+				statRow( 'Maniabilité',   +display.handling.toFixed( 1 ), 7 ) +
+				statRow( 'Accélération',  +display.acceleration.toFixed( 1 ), 7 );
+
+			if ( dotsEl ) {
+
+				dotsEl.querySelectorAll( '.vc-dot' ).forEach( ( d, i ) => {
+
+					const active = i === idx;
+					d.classList.toggle( 'active', active );
+					d.style.background = active ? COLOR_HEX[ keys[ i ] ] : '';
+
+				} );
+
+			}
+
+			// Refresh upgrades section in-place
+			const upgradesEl = document.getElementById( 'vc-upgrades' );
+			if ( upgradesEl ) upgradesEl.outerHTML = renderUpgradesSection( key );
+			bindUpgradeButtons( key );
+
+		};
+
 		// Nav
 		const navigate = ( delta ) => {
 
@@ -492,6 +589,9 @@ export class Lobby {
 			this._carousel.setVehicle( keys[ idx ] );
 
 		};
+
+		// Bind initial upgrade buttons
+		bindUpgradeButtons( key );
 
 		document.getElementById( 'vc-btn-back' ).addEventListener( 'click', () => {
 

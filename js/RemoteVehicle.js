@@ -21,12 +21,15 @@ export class RemoteVehicle {
         this.wheels = [];
         this.wheelFL = null;
         this.wheelFR = null;
+        this.wheelBL = null;
+        this.wheelBR = null;
 
         this.spherePos = new THREE.Vector3();
         this.linearSpeed = 0;
         this.acceleration = 0;
         this.driftIntensity = 0;
         this.inputX = 0;
+        this.inputZ = 0;
 
         this.prevModelPos = new THREE.Vector3();
         this.modelVelocity = new THREE.Vector3();
@@ -54,6 +57,8 @@ export class RemoteVehicle {
 
                 if ( name.includes( 'front' ) && name.includes( 'left' ) ) this.wheelFL = child;
                 if ( name.includes( 'front' ) && name.includes( 'right' ) ) this.wheelFR = child;
+                if ( name.includes( 'back' ) && name.includes( 'left' ) ) this.wheelBL = child;
+                if ( name.includes( 'back' ) && name.includes( 'right' ) ) this.wheelBR = child;
 
             }
 
@@ -93,11 +98,13 @@ export class RemoteVehicle {
         _currQ.set( serverState.sqx, serverState.sqy, serverState.sqz, serverState.sqw );
         this.container.quaternion.slerp( _currQ, lerpFactor );
 
-        // Use server values for visuals
-        this.linearSpeed = serverState.linearSpeed;
-        this.acceleration = serverState.acceleration;
-        this.driftIntensity = serverState.driftIntensity;
-        this.inputX = serverState.inputX;
+        // Lerp visual values to avoid snapping artifacts from 20Hz network updates
+        const visualLerp = 1 - Math.exp( - 8 * dt );
+        this.linearSpeed += ( serverState.linearSpeed - this.linearSpeed ) * visualLerp;
+        this.acceleration += ( serverState.acceleration - this.acceleration ) * visualLerp;
+        this.driftIntensity += ( serverState.driftIntensity - this.driftIntensity ) * visualLerp;
+        this.inputX += ( serverState.inputX - this.inputX ) * visualLerp;
+        this.inputZ += ( serverState.inputZ - this.inputZ ) * visualLerp;
 
         // Model velocity
         if ( dt > 0 ) {
@@ -116,17 +123,31 @@ export class RemoteVehicle {
 
         if ( ! this.bodyNode ) return;
 
-        this.bodyNode.rotation.x = lerpAngle(
-            this.bodyNode.rotation.x,
-            -( this.linearSpeed - this.acceleration ) / 6,
-            dt * 10
-        );
+        if ( USE_ARCADE_VEHICLE ) {
 
-        this.bodyNode.rotation.z = lerpAngle(
-            this.bodyNode.rotation.z,
-            -( this.inputX / 5 ) * this.linearSpeed,
-            dt * 5
-        );
+            // In arcade mode, linearSpeed is in m/s (can reach ~10). Use inputZ to derive
+            // a pitch that matches what the local arcade body produces (~±0.15 rad max).
+            const targetPitch = THREE.MathUtils.clamp( -this.inputZ * 0.12, -0.15, 0.15 );
+            const targetRoll = THREE.MathUtils.clamp( -( this.inputX / 5 ) * Math.min( Math.abs( this.linearSpeed ) / 5, 1 ), -0.2, 0.2 );
+
+            this.bodyNode.rotation.x = lerpAngle( this.bodyNode.rotation.x, targetPitch, dt * 8 );
+            this.bodyNode.rotation.z = lerpAngle( this.bodyNode.rotation.z, targetRoll, dt * 8 );
+
+        } else {
+
+            this.bodyNode.rotation.x = lerpAngle(
+                this.bodyNode.rotation.x,
+                -( this.linearSpeed - this.acceleration ) / 6,
+                dt * 10
+            );
+
+            this.bodyNode.rotation.z = lerpAngle(
+                this.bodyNode.rotation.z,
+                -( this.inputX / 5 ) * this.linearSpeed,
+                dt * 5
+            );
+
+        }
 
         this.bodyNode.position.y = THREE.MathUtils.lerp( this.bodyNode.position.y, 0.2, dt * 5 );
 

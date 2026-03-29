@@ -14,6 +14,8 @@ import { Network } from './Network.js';
 import { Lobby } from './Lobby.js';
 import { RaceHUD } from './RaceHUD.js';
 import { VEHICLE_STATS, USE_ARCADE_VEHICLE } from './VehicleStats.js';
+import { upgradeService } from './UpgradeService.js';
+import { profileService } from './ProfileService.js';
 
 
 const renderer = new THREE.WebGLRenderer( { antialias: true, outputBufferType: THREE.HalfFloatType } );
@@ -170,8 +172,9 @@ function initSinglePlayer( customCells, spawn, vehicleKey ) {
 		restitution: 0.0,
 	} );
 
-	const vKey = vehicleKey || 'yellow';
-	const vStats = VEHICLE_STATS[ vKey ] || VEHICLE_STATS.yellow;
+	const vKey   = vehicleKey || 'yellow';
+	const vStats = JSON.parse( JSON.stringify( VEHICLE_STATS[ vKey ] || VEHICLE_STATS.yellow ) );
+	upgradeService.applyDeltasToStats( vStats, vKey );
 
 	const sphereBody = USE_ARCADE_VEHICLE
 		? createChassisBody( world, spawn ? spawn.position : null, vStats )
@@ -281,6 +284,7 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 	const vehicle = new Vehicle( vStats );
 	const remoteVehicles = new Map();
 	const remoteProxyBodies = new Map(); // sessionId → kinematic body in localWorld
+	const remoteParticles = new Map();   // sessionId → SmokeTrails
 
 	const cam = new Camera();
 	const controls = new Controls();
@@ -412,6 +416,7 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 			const group = remote.init( models[ modelName ] );
 			scene.add( group );
 			remoteVehicles.set( sessionId, remote );
+			remoteParticles.set( sessionId, new SmokeTrails( scene ) );
 
 			// Add a kinematic proxy body so the local player physically collides with remote players
 			const state = network.getPlayerState( sessionId );
@@ -443,6 +448,14 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 
 			remote.dispose( scene );
 			remoteVehicles.delete( sessionId );
+
+		}
+
+		const rp = remoteParticles.get( sessionId );
+		if ( rp ) {
+
+			rp.dispose( scene );
+			remoteParticles.delete( sessionId );
 
 		}
 
@@ -490,6 +503,14 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 		}, 280 );
 
 	}
+
+	// Apply rewards when the server confirms them
+	network.onRaceReward = ( data ) => {
+
+		profileService.applyRaceResult( data );
+		hud.showRewardToast( data.xp_earned, data.credits_earned );
+
+	};
 
 	// Race phase changes
 	network.onPhaseChange = ( phase, countdown ) => {
@@ -542,6 +563,14 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 
 		remoteVehicles.clear();
 		remoteProxyBodies.clear();
+
+		for ( const rp of remoteParticles.values() ) {
+
+			rp.dispose( scene );
+
+		}
+
+		remoteParticles.clear();
 
 		// Dispose particles
 		particles.dispose( scene );
@@ -653,6 +682,9 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 			const state = network.getPlayerState( sessionId );
 			remote.updateFromServer( dt, state );
 
+			const rp = remoteParticles.get( sessionId );
+			if ( rp ) rp.update( dt, remote );
+
 			// Move kinematic proxy body to match server position for local collision detection
 			const proxyBody = remoteProxyBodies.get( sessionId );
 			if ( proxyBody && state ) {
@@ -753,13 +785,14 @@ async function init() {
 
 		const vehicleKey = lobby.getVehicle();
 		const username   = lobby.getUsername();
+		const upgrades   = upgradeService.getVehicleUpgrades( vehicleKey );
 
 		lobby.showConnecting();
 
 		try {
 
-			await network.connect( getServerUrl(), getMapParam(), roomId || null, username, vehicleKey );
-		await waitForMyState();
+			await network.connect( getServerUrl(), getMapParam(), roomId || null, username, vehicleKey, upgrades );
+			await waitForMyState();
 
 		} catch ( e ) {
 
@@ -786,13 +819,14 @@ async function init() {
 
 		const vehicleKey = lobby.getVehicle();
 		const username   = lobby.getUsername();
+		const upgrades   = upgradeService.getVehicleUpgrades( vehicleKey );
 
 		lobby.showConnecting();
 
 		try {
 
-			await network.joinByCode( getServerUrl(), code, username, vehicleKey );
-		await waitForMyState();
+			await network.joinByCode( getServerUrl(), code, username, vehicleKey, upgrades );
+			await waitForMyState();
 
 		} catch ( e ) {
 

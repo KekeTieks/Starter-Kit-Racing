@@ -47,6 +47,19 @@ const MIGRATIONS = [
     `CREATE INDEX IF NOT EXISTS idx_race_results_player ON race_results(player_id)`,
     `CREATE INDEX IF NOT EXISTS idx_race_results_played_at ON race_results(played_at DESC)`,
 
+    // ── 003: vehicle upgrades ─────────────────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS vehicle_upgrades (
+        id         SERIAL PRIMARY KEY,
+        player_id  INTEGER NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+        vehicle    VARCHAR(20) NOT NULL,
+        upgrade_id VARCHAR(50) NOT NULL,
+        level      INTEGER NOT NULL DEFAULT 0,
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(player_id, vehicle, upgrade_id)
+    )`,
+
+    `CREATE INDEX IF NOT EXISTS idx_upgrades_player ON vehicle_upgrades(player_id)`,
+
 ];
 
 export async function migrate() {

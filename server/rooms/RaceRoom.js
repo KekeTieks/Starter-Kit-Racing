@@ -12,6 +12,38 @@ import {
 import { registerRoomCode, unregisterRoomCode } from '../RoomCodeRegistry.js';
 import { query } from '../db/client.js';
 import { computeRaceRewards, computeLevel, xpForLevel } from '../db/xp.js';
+import { UPGRADE_CONFIG, MAX_UPGRADE_LEVEL } from '../simulation/UpgradeConfig.js';
+
+/**
+ * Applies player upgrade levels to a (already deep-cloned) stats object.
+ * rawUpgrades: { engine: 2, brakes: 1 } — level integers sent by client.
+ * Deltas are recomputed server-side from UPGRADE_CONFIG; client values are never trusted.
+ */
+function applyUpgrades( stats, rawUpgrades ) {
+
+    if ( ! rawUpgrades || typeof rawUpgrades !== 'object' || Array.isArray( rawUpgrades ) ) return;
+
+    for ( const def of UPGRADE_CONFIG ) {
+
+        const level = Math.min(
+            Math.floor( rawUpgrades[ def.id ] ?? 0 ),
+            MAX_UPGRADE_LEVEL,
+            def.levels.length
+        );
+
+        for ( let i = 0; i < level; i++ ) {
+
+            for ( const [ stat, val ] of Object.entries( def.levels[ i ].delta ) ) {
+
+                if ( typeof stats[ stat ] === 'number' ) stats[ stat ] += val;
+
+            }
+
+        }
+
+    }
+
+}
 
 const COLORS = [ 'yellow', 'green', 'purple', 'red' ];
 const TICK_RATE = 60;
@@ -59,7 +91,8 @@ export class RaceRoom extends Room {
         this.finishLine = computeFinishLine( this.trackCells );
         this.checkpoints = computeCheckpoints( this.trackCells );
         this.finishTimeout = null;
-        this.inputCounts = new Map(); // sessionId → { count, windowStart }
+        this.inputCounts  = new Map(); // sessionId → { count, windowStart }
+        this.playerStats  = new Map(); // sessionId → upgraded stats object
 
         // Contact listener for impact sounds + speed penalty
         this.contactListener = {
@@ -177,7 +210,8 @@ export class RaceRoom extends Room {
             for ( const [ sessionId, sim ] of this.sims ) {
 
                 const spawn = spawnPoints[ i++ ];
-                const simStats = VEHICLE_STATS[ this.state.players.get( sessionId )?.vehicle || 'yellow' ];
+                const simStats = this.playerStats.get( sessionId )
+                    || VEHICLE_STATS[ this.state.players.get( sessionId )?.vehicle || 'yellow' ];
                 sim.body = USE_ARCADE_VEHICLE
                     ? createChassisBody( this.world, spawn.position, simStats )
                     : createSphereBody( this.world, spawn.position );
@@ -280,7 +314,12 @@ export class RaceRoom extends Room {
         this.colorIndex++;
 
         const color = vehicleKey;
-        const stats = VEHICLE_STATS[ vehicleKey ];
+        const stats = JSON.parse( JSON.stringify( VEHICLE_STATS[ vehicleKey ] ) );
+
+        const rawUpgrades = ( options && typeof options.upgrades === 'object' && ! Array.isArray( options.upgrades ) )
+            ? options.upgrades : {};
+        applyUpgrades( stats, rawUpgrades );
+        this.playerStats.set( client.sessionId, stats );
 
         const spawnPoints = computeSpawnPositions( this.trackCells, this.colorIndex );
         const spawn = spawnPoints[ spawnPoints.length - 1 ];
@@ -319,6 +358,7 @@ export class RaceRoom extends Room {
         this.sims.delete( client.sessionId );
         this.raceData.delete( client.sessionId );
         this.inputCounts.delete( client.sessionId );
+        this.playerStats.delete( client.sessionId );
         this.state.players.delete( client.sessionId );
 
         // Transfer host if host left
@@ -639,7 +679,7 @@ export class RaceRoom extends Room {
         for ( const [ sessionId, player ] of this.state.players ) {
 
             const rank = player.finished ? player.finishPosition : 0;
-            this._awardRaceResult( player.username, rank, playersCount ).catch( ( err ) => {
+            this._awardRaceResult( sessionId, player.username, rank, playersCount ).catch( ( err ) => {
 
                 console.error( `[RaceRoom] award error for ${ player.username }:`, err.message );
 
@@ -649,7 +689,7 @@ export class RaceRoom extends Room {
 
     }
 
-    async _awardRaceResult( username, rank, playersCount ) {
+    async _awardRaceResult( sessionId, username, rank, playersCount ) {
 
         if ( ! username ) return;
 
@@ -690,6 +730,20 @@ export class RaceRoom extends Room {
         );
 
         console.log( `[RaceRoom] ${ username } awarded ${ xpEarned } XP / ${ creditsEarned } credits (rank ${ rank }/${ playersCount })` );
+
+        // Send rewards to the client so they can update their local profile without a re-fetch
+        const client = this.clients.getById( sessionId );
+        if ( client ) {
+            client.send( 'raceReward', {
+                xp_earned:     xpEarned,
+                credits_earned: creditsEarned,
+                xp:            s.xp + xpEarned,
+                xp_this_level: newXpThisLevel,
+                xp_for_next:   null, // client will refresh profile for full data
+                credits:       Number( s.credits ) + creditsEarned,
+                new_level:     newLevel,
+            } );
+        }
 
     }
 

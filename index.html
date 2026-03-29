@@ -440,6 +440,101 @@
 			#lobby.vc-fullscreen { overflow-y: auto; }
 		}
 
+		/* ── Vehicle upgrades section ── */
+		.vc-upgrades-section {
+			border-top: 1px solid rgba(255,255,255,0.08);
+			padding-top: 14px;
+			margin-bottom: 14px;
+			display: flex;
+			flex-direction: column;
+			gap: 10px;
+		}
+		.upg-header {
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+			font-size: 10px;
+			font-weight: 700;
+			letter-spacing: 0.12em;
+			text-transform: uppercase;
+			color: rgba(255,255,255,0.4);
+			margin-bottom: 2px;
+		}
+		.upg-credits {
+			color: #f5c842;
+			font-weight: 800;
+			letter-spacing: 0.04em;
+		}
+		.upg-row {
+			display: flex;
+			align-items: center;
+			gap: 10px;
+		}
+		.upg-icon {
+			font-size: 18px;
+			width: 22px;
+			text-align: center;
+			flex-shrink: 0;
+		}
+		.upg-info {
+			flex: 1;
+			min-width: 0;
+		}
+		.upg-name-line {
+			display: flex;
+			justify-content: space-between;
+			align-items: baseline;
+			margin-bottom: 4px;
+		}
+		.upg-name {
+			font-size: 12px;
+			font-weight: 700;
+			color: rgba(255,255,255,0.9);
+		}
+		.upg-level {
+			font-size: 10px;
+			color: rgba(255,255,255,0.4);
+		}
+		.upg-pips {
+			display: flex;
+			gap: 3px;
+		}
+		.upg-pip {
+			width: 10px;
+			height: 5px;
+			border-radius: 2px;
+			background: rgba(255,255,255,0.12);
+		}
+		.upg-pip.filled {
+			background: #4a9eff;
+		}
+		.upg-buy-btn {
+			flex-shrink: 0;
+			padding: 5px 10px;
+			border: 1px solid rgba(74,158,255,0.5);
+			border-radius: 7px;
+			background: rgba(74,158,255,0.15);
+			color: #4a9eff;
+			font-size: 11px;
+			font-weight: 700;
+			cursor: pointer;
+			transition: background 0.15s, border-color 0.15s;
+			white-space: nowrap;
+		}
+		.upg-buy-btn:hover:not(:disabled) {
+			background: rgba(74,158,255,0.3);
+			border-color: #4a9eff;
+		}
+		.upg-buy-btn:disabled {
+			opacity: 0.35;
+			cursor: not-allowed;
+		}
+		.upg-buy-btn--maxed {
+			border-color: rgba(245,200,66,0.5);
+			background: rgba(245,200,66,0.12);
+			color: #f5c842;
+		}
+
 		/* ── Primary button ── */
 		.primary-btn {
 			padding: 14px 32px;
@@ -1659,6 +1754,26 @@
 			margin: 0;
 			letter-spacing: 0.05em;
 		}
+		.hud-reward-toast {
+			position: fixed;
+			bottom: 80px;
+			left: 50%;
+			transform: translateX(-50%);
+			display: flex;
+			gap: 16px;
+			background: rgba(0,0,0,0.75);
+			border: 1px solid rgba(255,255,255,0.15);
+			border-radius: 12px;
+			padding: 10px 20px;
+			color: #fff;
+			font-size: 15px;
+			font-weight: 600;
+			letter-spacing: 0.05em;
+			z-index: 30;
+			pointer-events: none;
+		}
+		.hud-reward-toast span:first-child { color: #7ecfff; }
+		.hud-reward-toast span:last-child  { color: #ffd86e; }
 	</style>
 </head>
 <body>

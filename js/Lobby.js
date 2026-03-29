@@ -1028,6 +1028,17 @@ export class Lobby {
 
 	}
 
+	_enableModeButtons() {
+
+		[ 'btn-create', 'btn-offline', 'btn-join-code', 'btn-confirm' ].forEach( ( id ) => {
+
+			const el = document.getElementById( id );
+			if ( el ) el.disabled = false;
+
+		} );
+
+	}
+
 	// ─── Screen 4 : Multiplayer room lobby ────────────────────────────────────
 
 	showRoom( _roomId, isHost, roomCode ) {

@@ -10,6 +10,10 @@ export const PlayerState = schema({
     qy: "number",
     qz: "number",
     qw: { type: "number", default: 1 },
+    // Sphere linear velocity (for client reconciliation)
+    vx: "number",
+    vy: "number",
+    vz: "number",
     // Values needed for client-side visuals (wheels, body tilt, particles, audio)
     linearSpeed: "number",
     acceleration: "number",

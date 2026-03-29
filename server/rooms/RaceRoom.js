@@ -1,5 +1,5 @@
 import { Room } from 'colyseus';
-import { updateWorld, rigidBody } from 'crashcat';
+import { updateWorld, rigidBody, ContactValidateResult } from 'crashcat';
 import { RaceState, PlayerState } from '../schema/RaceState.js';
 import { initPhysics, createSphereBody, createChassisBody, initRayFilter } from '../simulation/PhysicsWorld.js';
 import { VehicleSim } from '../simulation/VehicleSim.js';
@@ -54,6 +54,7 @@ export class RaceRoom extends Room {
 
     maxClients = 4;
     patchRate = 16; // ~60Hz state sync (default 50ms = 20Hz is too slow for racing)
+    autoDispose = true; // dispose room when last player leaves (prevents zombie rooms)
 
     onCreate( options ) {
 
@@ -99,13 +100,53 @@ export class RaceRoom extends Room {
         this.inputCounts  = new Map(); // sessionId → { count, windowStart }
         this.playerStats  = new Map(); // sessionId → upgraded stats object
 
-        // Contact listener for impact sounds + speed penalty
+        // Contact listener — let crashcat's solver handle collision response
+        // natively. We only use the callback to broadcast impact events and
+        // tune restitution/friction via the settings object.
+        // NEVER call setLinearVelocity / setAngularVelocity inside callbacks —
+        // that fights the constraint solver and produces ghost 180s.
+        const wallBodies = this.world._wallBodies || new Set();
+
         this.contactListener = {
-            onContactAdded: ( bodyA, bodyB ) => {
+            onContactValidate: ( bodyA, bodyB, _baseOffset, hit ) => {
+
+                for ( const [ , sim ] of this.sims ) {
+
+                    if ( bodyA === sim.body || bodyB === sim.body ) {
+
+                        const otherBody = bodyA === sim.body ? bodyB : bodyA;
+
+                        if ( ! wallBodies.has( otherBody ) ) break;
+
+                        // Reject contacts whose penetration axis is mostly vertical —
+                        // ghost contacts at arc seam joints produce normals with a large
+                        // Y component; real wall contacts are nearly horizontal.
+                        const ax = hit.penetrationAxis;
+                        const len2 = ax[ 0 ] * ax[ 0 ] + ax[ 1 ] * ax[ 1 ] + ax[ 2 ] * ax[ 2 ];
+
+                        if ( len2 > 0.0001 && ( ax[ 1 ] * ax[ 1 ] / len2 ) > 0.5 ) {
+
+                            return ContactValidateResult.REJECT_CONTACT;
+
+                        }
+
+                        break;
+
+                    }
+
+                }
+
+                return ContactValidateResult.ACCEPT_ALL_CONTACTS_FOR_THIS_BODY_PAIR;
+
+            },
+            onContactAdded: ( bodyA, bodyB, _manifold, settings ) => {
 
                 for ( const [ sessionId, sim ] of this.sims ) {
 
                     if ( bodyA === sim.body || bodyB === sim.body ) {
+
+                        const otherBody = bodyA === sim.body ? bodyB : bodyA;
+                        if ( ! wallBodies.has( otherBody ) ) break;
 
                         const vel = sim.body.motionProperties.linearVelocity;
                         const speed = Math.sqrt( vel[ 0 ] * vel[ 0 ] + vel[ 2 ] * vel[ 2 ] );
@@ -116,39 +157,27 @@ export class RaceRoom extends Room {
 
                         }
 
-                        // Server-authoritative wall collision with proper reflection
-                        if ( speed > 0.5 ) {
+                        settings.combinedRestitution = 0.0;
+                        settings.combinedFriction = 0.85;
 
-                            // Approximate wall normal from body positions
-                            const wallBody = bodyA === sim.body ? bodyB : bodyA;
-                            const sp = sim.body.position, wp = wallBody.position;
-                            let nx = sp[ 0 ] - wp[ 0 ], nz = sp[ 2 ] - wp[ 2 ];
-                            const nLen = Math.sqrt( nx * nx + nz * nz );
-                            if ( nLen > 0.001 ) { nx /= nLen; nz /= nLen; } else { nx = 0; nz = 1; }
+                        break;
 
-                            // Decompose velocity into normal and tangential
-                            const vDotN = vel[ 0 ] * nx + vel[ 2 ] * nz;
+                    }
 
-                            // Only penalize if moving toward the wall
-                            if ( vDotN < 0 ) {
+                }
 
-                                const bounceRestitution = 0.3;
-                                const newVn = - vDotN * bounceRestitution;
+            },
+            onContactPersisted: ( bodyA, bodyB, _manifold, settings ) => {
 
-                                const tangentFriction = Math.max( 0.85, 1 - Math.abs( vDotN ) * 0.03 );
+                for ( const [ , sim ] of this.sims ) {
 
-                                const tx = vel[ 0 ] - vDotN * nx;
-                                const tz = vel[ 2 ] - vDotN * nz;
+                    if ( bodyA === sim.body || bodyB === sim.body ) {
 
-                                rigidBody.setLinearVelocity( this.world, sim.body, [
-                                    tx * tangentFriction + nx * newVn,
-                                    vel[ 1 ],
-                                    tz * tangentFriction + nz * newVn
-                                ] );
+                        const otherBody = bodyA === sim.body ? bodyB : bodyA;
+                        if ( ! wallBodies.has( otherBody ) ) break;
 
-                            }
-
-                        }
+                        settings.combinedRestitution = 0.0;
+                        settings.combinedFriction = 0.85;
 
                         break;
 
@@ -192,6 +221,7 @@ export class RaceRoom extends Room {
                 z: Math.max( -1, Math.min( 1, data.z ) ),
                 touchActive: !! data.touchActive,
                 handbrake: !! data.handbrake,
+                nitro: !! data.nitro,
             } );
 
         } );
@@ -584,6 +614,8 @@ export class RaceRoom extends Room {
             player.qy = sim.quat[ 1 ];
             player.qz = sim.quat[ 2 ];
             player.qw = sim.quat[ 3 ];
+            const lv = sim.body ? sim.body.motionProperties.linearVelocity : null;
+            if ( lv ) { player.vx = lv[ 0 ]; player.vy = lv[ 1 ]; player.vz = lv[ 2 ]; }
             player.linearSpeed = sim.linearSpeed;
             player.acceleration = sim.acceleration;
             player.driftIntensity = sim.driftIntensity;
@@ -793,7 +825,7 @@ export class RaceRoom extends Room {
                 credits_earned: creditsEarned,
                 xp:            s.xp + xpEarned,
                 xp_this_level: newXpThisLevel,
-                xp_for_next:   null, // client will refresh profile for full data
+                xp_for_next:   xpForLevel( newLevel + 1 ),
                 credits:       Number( s.credits ) + creditsEarned,
                 new_level:     newLevel,
             } );

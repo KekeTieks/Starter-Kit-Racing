@@ -129,7 +129,8 @@ class ProfileService {
      */
     applyRaceResult( result ) {
 
-        if ( ! this._profile ) return;
+        if ( ! this._profile ) return { leveledUp: false, oldLevel: 1, newLevel: 1 };
+        const oldLevel = this._profile.level;
         Object.assign( this._profile, {
             xp:           result.xp,
             xp_this_level: result.xp_this_level,
@@ -138,6 +139,7 @@ class ProfileService {
             level:        result.new_level,
         } );
         this._save();
+        return { leveledUp: result.new_level > oldLevel, oldLevel, newLevel: result.new_level };
 
     }
 

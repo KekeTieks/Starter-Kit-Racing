@@ -47,6 +47,28 @@ const LERP_SPEED = 1.5;   // transitions take ~0.7s
 const RAIN_POOL_SIZE = 300;
 const _dummy = new THREE.Object3D();
 
+// Cached rain drop texture (shared across all RainPool instances)
+let _cachedRainTexture = null;
+
+function _getRainTexture() {
+
+	if ( _cachedRainTexture ) return _cachedRainTexture;
+
+	const canvas = document.createElement( 'canvas' );
+	canvas.width = 4; canvas.height = 16;
+	const ctx = canvas.getContext( '2d' );
+	const grad = ctx.createLinearGradient( 0, 0, 0, 16 );
+	grad.addColorStop( 0,    'rgba(200,220,255,0)' );
+	grad.addColorStop( 0.15, 'rgba(200,220,255,0.9)' );
+	grad.addColorStop( 0.85, 'rgba(200,220,255,0.9)' );
+	grad.addColorStop( 1,    'rgba(200,220,255,0)' );
+	ctx.fillStyle = grad;
+	ctx.fillRect( 0, 0, 4, 16 );
+	_cachedRainTexture = new THREE.CanvasTexture( canvas );
+	return _cachedRainTexture;
+
+}
+
 // ── Rain particle pool ───────────────────────────────────────────────────────
 
 class RainPool {
@@ -56,18 +78,7 @@ class RainPool {
 		this._scene = scene;
 		this._opacity = 0;
 
-		// Generate a 4×16 white-to-transparent gradient texture
-		const canvas = document.createElement( 'canvas' );
-		canvas.width = 4; canvas.height = 16;
-		const ctx = canvas.getContext( '2d' );
-		const grad = ctx.createLinearGradient( 0, 0, 0, 16 );
-		grad.addColorStop( 0,    'rgba(200,220,255,0)' );
-		grad.addColorStop( 0.15, 'rgba(200,220,255,0.9)' );
-		grad.addColorStop( 0.85, 'rgba(200,220,255,0.9)' );
-		grad.addColorStop( 1,    'rgba(200,220,255,0)' );
-		ctx.fillStyle = grad;
-		ctx.fillRect( 0, 0, 4, 16 );
-		const tex = new THREE.CanvasTexture( canvas );
+		const tex = _getRainTexture();
 
 		const geo = new THREE.PlaneGeometry( 0.04, 0.3 );
 		const mat = new THREE.MeshBasicMaterial( {
@@ -175,7 +186,7 @@ class RainPool {
 
 		this._scene.remove( this._mesh );
 		this._mesh.geometry.dispose();
-		this._mesh.material.map.dispose();
+		// Don't dispose the shared cached rain texture
 		this._mesh.material.dispose();
 
 	}

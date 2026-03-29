@@ -95,6 +95,13 @@ export class Vehicle {
 		// Post-collision reconciliation cooldown (frames to skip soft correction after a contact)
 		this._postContactFrames = 0;
 
+		// In multiplayer the server is authoritative for fall resets — skip client-side reset
+		this.isMultiplayer = false;
+
+		// Spawn state for fall resets — set externally after construction from track spawn data
+		this._spawnPos = null;
+		this._spawnAngle = 0;
+
 		// Arcade vehicle physics
 		this._useArcade = USE_ARCADE_VEHICLE;
 		this._arcadeVehicle = null;
@@ -268,6 +275,33 @@ export class Vehicle {
 		const linVel = this.rigidBody.motionProperties.linearVelocity;
 		const angVel = this.rigidBody.motionProperties.angularVelocity;
 
+		// Guard: if the physics body's quaternion is NaN (solver edge-case),
+		// reset it to identity and skip this frame to prevent NaN propagation
+		// through ALL force calculations (forward/right/up → grip/suspension/steering).
+		if ( ! isFinite( quat[ 0 ] ) || ! isFinite( quat[ 1 ] ) || ! isFinite( quat[ 2 ] ) || ! isFinite( quat[ 3 ] ) ) {
+
+			rigidBody.setQuaternion( this.physicsWorld, this.rigidBody, [ 0, 0, 0, 1 ], false );
+			rigidBody.setLinearVelocity( this.physicsWorld, this.rigidBody, [ 0, 0, 0 ] );
+			rigidBody.setAngularVelocity( this.physicsWorld, this.rigidBody, [ 0, 0, 0 ] );
+			this._arcadeVehicle.reset();
+			return;
+
+		}
+
+		// Same guard for position/velocity — a NaN anywhere corrupts all downstream math
+		if ( ! isFinite( pos[ 0 ] ) || ! isFinite( pos[ 1 ] ) || ! isFinite( pos[ 2 ] )
+			|| ! isFinite( linVel[ 0 ] ) || ! isFinite( linVel[ 1 ] ) || ! isFinite( linVel[ 2 ] ) ) {
+
+			const rp = this._spawnPos || [ 3.5, 0.5, 5 ];
+			rigidBody.setPosition( this.physicsWorld, this.rigidBody, rp, false );
+			rigidBody.setQuaternion( this.physicsWorld, this.rigidBody, [ 0, 0, 0, 1 ], false );
+			rigidBody.setLinearVelocity( this.physicsWorld, this.rigidBody, [ 0, 0, 0 ] );
+			rigidBody.setAngularVelocity( this.physicsWorld, this.rigidBody, [ 0, 0, 0 ] );
+			this._arcadeVehicle.reset();
+			return;
+
+		}
+
 		const cs = this._chassisState;
 		cs.position[ 0 ] = pos[ 0 ]; cs.position[ 1 ] = pos[ 1 ]; cs.position[ 2 ] = pos[ 2 ];
 		cs.quaternion[ 0 ] = quat[ 0 ]; cs.quaternion[ 1 ] = quat[ 1 ]; cs.quaternion[ 2 ] = quat[ 2 ]; cs.quaternion[ 3 ] = quat[ 3 ];
@@ -355,14 +389,19 @@ export class Vehicle {
 			dt
 		);
 
-		// Fall reset
-		if ( pos[ 1 ] < - 10 ) {
+		// Fall reset — in multiplayer the server handles this authoritatively,
+		// client will snap via reconciliation (avoids dual-reset desync).
+		if ( pos[ 1 ] < - 10 && ! this.isMultiplayer ) {
 
-			rigidBody.setPosition( this.physicsWorld, this.rigidBody, [ 3.5, 0.5, 5 ], false );
+			const rp = this._spawnPos || [ 3.5, 0.5, 5 ];
+			const a = this._spawnAngle || 0;
+			const rq = [ 0, Math.sin( a / 2 ), 0, Math.cos( a / 2 ) ];
+
+			rigidBody.setPosition( this.physicsWorld, this.rigidBody, rp, false );
 			rigidBody.setLinearVelocity( this.physicsWorld, this.rigidBody, [ 0, 0, 0 ] );
 			rigidBody.setAngularVelocity( this.physicsWorld, this.rigidBody, [ 0, 0, 0 ] );
-			rigidBody.setQuaternion( this.physicsWorld, this.rigidBody, [ 0, 0, 0, 1 ], false );
-			this.spherePos.set( 3.5, 0.5, 5 );
+			rigidBody.setQuaternion( this.physicsWorld, this.rigidBody, rq, false );
+			this.spherePos.set( rp[ 0 ], rp[ 1 ], rp[ 2 ] );
 			this.sphereVel.set( 0, 0, 0 );
 			this.linearSpeed = 0;
 			this.angularSpeed = 0;
@@ -710,9 +749,16 @@ export class Vehicle {
 
 		if ( error > SNAP_THRESHOLD ) {
 
-			// Hard snap: teleport to server position, keep server orientation
+			// Hard snap: teleport to server position, keep server orientation + velocity
 			rigidBody.setPosition( this.physicsWorld, this.rigidBody, [ sx, sy, sz ], false );
 			this.spherePos.set( sx, sy, sz );
+
+			if ( serverState.svx !== undefined ) {
+
+				rigidBody.setLinearVelocity( this.physicsWorld, this.rigidBody,
+					[ serverState.svx, serverState.svy, serverState.svz ] );
+
+			}
 
 			if ( this._useArcade ) {
 
@@ -723,15 +769,12 @@ export class Vehicle {
 
 			this._postContactFrames = 0;
 
-		} else if ( error > 0.05 ) {
+		} else if ( error > 0.05 && this._postContactFrames === 0 ) {
 
-			// During post-contact frames: apply a much gentler correction so physics can settle
-			// without blocking it entirely (which caused divergence to build up → saccade on resume).
-			const inContact = this._postContactFrames > 0;
-			const rate = inContact
-				? Math.min( 0.02, error * 0.03 )   // very gentle during contact
-				: Math.min( 0.1, error * 0.2 );     // normal soft correction otherwise
-
+			// Only nudge position when NOT in a post-contact window.
+			// Nudging into a wall during contact resolution creates artificial impulses
+			// (chassis gets pushed into the wall → physics ejects it → ghost 180).
+			const rate = Math.min( 0.1, error * 0.2 );
 			const cx = curPos[ 0 ] + dx * rate;
 			const cy = curPos[ 1 ] + dy * rate;
 			const cz = curPos[ 2 ] + dz * rate;
@@ -739,16 +782,32 @@ export class Vehicle {
 
 		}
 
-		// Rotation correction — reduced during contact to avoid physics-induced flips
+		// Rotation correction — adaptive rate based on angular divergence
 		if ( this._useArcade ) {
 
-			if ( error < 2.0 ) {
+			const bq = this.rigidBody.quaternion;
+			_currQ.set( bq[ 0 ], bq[ 1 ], bq[ 2 ], bq[ 3 ] );
+			_quat.set( serverState.sqx, serverState.sqy, serverState.sqz, serverState.sqw );
 
-				const inContact = this._postContactFrames > 0;
-				const rotRate = inContact ? 0.01 : 0.03;
-				const bq = this.rigidBody.quaternion;
-				_currQ.set( bq[ 0 ], bq[ 1 ], bq[ 2 ], bq[ 3 ] );
-				_quat.set( serverState.sqx, serverState.sqy, serverState.sqz, serverState.sqw );
+			// Measure angular divergence (dot product: 1 = identical, 0 = 90°)
+			let dot = _currQ.dot( _quat );
+			if ( dot < 0 ) { _quat.set( - _quat.x, - _quat.y, - _quat.z, - _quat.w ); dot = - dot; }
+
+			// Guard against NaN from floating-point edge cases
+			const clampedDot = Math.min( Math.max( dot, 0 ), 1 );
+			const angleDeg = Math.acos( clampedDot ) * 2 * ( 180 / Math.PI );
+
+			if ( ! isFinite( angleDeg ) ) {
+
+				// Hard snap to server orientation on NaN
+				rigidBody.setQuaternion( this.physicsWorld, this.rigidBody,
+					[ _quat.x, _quat.y, _quat.z, _quat.w ], false );
+
+			} else if ( angleDeg > 0.5 && this._postContactFrames === 0 ) {
+
+				// Skip rotation nudge during contact — let the physics solver settle the orientation
+				// before we start steering it toward the server value.
+				const rotRate = Math.min( 0.15, 0.02 + angleDeg * 0.002 );
 				_currQ.slerp( _quat, rotRate );
 				rigidBody.setQuaternion( this.physicsWorld, this.rigidBody,
 					[ _currQ.x, _currQ.y, _currQ.z, _currQ.w ], false );
@@ -764,6 +823,18 @@ export class Vehicle {
 
 		// Nudge speed toward server — faster rate so divergence after a wall hit resolves quickly
 		this.linearSpeed = this.linearSpeed + ( serverState.linearSpeed - this.linearSpeed ) * 0.15;
+
+		// Nudge linear velocity toward server — skip during post-contact to avoid fighting
+		// the constraint solver while it's still resolving the wall impulse.
+		if ( serverState.svx !== undefined && this._postContactFrames === 0 ) {
+
+			const vel = this.rigidBody.motionProperties.linearVelocity;
+			const nvx = vel[ 0 ] + ( serverState.svx - vel[ 0 ] ) * 0.12;
+			const nvy = vel[ 1 ] + ( serverState.svy - vel[ 1 ] ) * 0.12;
+			const nvz = vel[ 2 ] + ( serverState.svz - vel[ 2 ] ) * 0.12;
+			rigidBody.setLinearVelocity( this.physicsWorld, this.rigidBody, [ nvx, nvy, nvz ] );
+
+		}
 
 	}
 

@@ -324,6 +324,29 @@ export class RaceHUD {
 
     }
 
+    showLevelUpToast( oldLevel, newLevel ) {
+
+        const toast = document.createElement( 'div' );
+        toast.className = 'hud-levelup-toast';
+        toast.innerHTML = `<span>LEVEL UP!</span><span>Niveau ${ oldLevel } → ${ newLevel }</span>`;
+        document.body.appendChild( toast );
+
+        gsap.fromTo( toast,
+            { opacity: 0, scale: 0.7 },
+            {
+                opacity: 1, scale: 1, duration: 0.5, ease: 'back.out(1.7)',
+                delay: 0.3,
+                onComplete: () => {
+                    gsap.to( toast, {
+                        opacity: 0, y: -20, delay: 3, duration: 0.5,
+                        onComplete: () => toast.remove(),
+                    } );
+                },
+            }
+        );
+
+    }
+
 }
 
 function formatTime( ms ) {

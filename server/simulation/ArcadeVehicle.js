@@ -159,7 +159,8 @@ export class ArcadeVehicle {
 		const speed = chassis.linearVelocity[ 0 ] * this._forward[ 0 ]
 			+ chassis.linearVelocity[ 2 ] * this._forward[ 2 ];
 		const absSpeed = Math.abs( speed );
-		const topSpeed = cfg.maxSpeed * 10;
+		const nitro = input.nitroMult || 1;
+		const topSpeed = cfg.maxSpeed * 10 * ( nitro > 1 ? 1.25 : 1 );
 		const speedFraction = clamp( absSpeed / topSpeed, 0, 1 );
 
 		const cx = chassis.position[ 0 ], cy = chassis.position[ 1 ], cz = chassis.position[ 2 ];
@@ -202,10 +203,10 @@ export class ArcadeVehicle {
 					groundedCount ++;
 					this._suspCompression[ i ] = compression;
 
-					const compVel = ( compression - this.prevCompression[ i ] ) / dt;
+					const compVel = clamp( ( compression - this.prevCompression[ i ] ) / dt, - 20, 20 );
 					const damping = compVel > 0 ? cfg.dampingCompression : cfg.dampingRelaxation;
 					let force = cfg.springStiffness * compression + damping * compVel;
-					force = Math.max( 0, force );
+					force = clamp( force, 0, 50000 );
 
 					this._suspForce[ i ] = force;
 					this.prevCompression[ i ] = compression;
@@ -239,11 +240,12 @@ export class ArcadeVehicle {
 
 			const fwd0 = this._forward[ 0 ], fwd2 = this._forward[ 2 ];
 
-			// Engine
+			// Engine (with optional nitro multiplier)
 			if ( input.throttle > 0 ) {
 
+				const nitro = input.nitroMult || 1;
 				const torqueCurve = 1 - speedFraction * 0.7;
-				const engineF = input.throttle * cfg.engineForce * torqueCurve;
+				const engineF = input.throttle * cfg.engineForce * torqueCurve * nitro;
 				this._pushForce( fwd0 * engineF, 0, fwd2 * engineF, cx, cy, cz );
 
 			}
@@ -428,27 +430,31 @@ export class ArcadeVehicle {
 
 		const upY = this._up[ 1 ];
 
-		if ( upY < 0.98 && groundedCount > 0 ) {
+		if ( upY < 0.98 ) {
+
+			// Stronger correction when grounded, gentler in the air to prevent free tumble
+			const torqueStrength = groundedCount > 0 ? 2000 : 300;
 
 			v3Cross( this._tmp1, this._up, [ 0, 1, 0 ] );
 			const sinAngle = v3Len( this._tmp1 );
 			if ( sinAngle > EPSILON ) {
 
 				v3Normalize( this._tmp1, this._tmp1 );
-				v3Scale( this._tmp1, this._tmp1, 2000 * sinAngle );
+				v3Scale( this._tmp1, this._tmp1, torqueStrength * sinAngle );
 				this._pushTorque( this._tmp1[ 0 ], this._tmp1[ 1 ], this._tmp1[ 2 ] );
 
 			}
 
 		}
 
-		// Always damp pitch/roll to keep chassis planted
-		if ( groundedCount > 0 ) {
+		// Damp pitch/roll — stronger when grounded, lighter in air
+		{
 
+			const dampFactor = groundedCount > 0 ? 800 : 150;
 			const pitchRate = v3Dot( chassis.angularVelocity, this._right );
 			const rollRate = v3Dot( chassis.angularVelocity, this._forward );
-			const dampPitch = - pitchRate * 800;
-			const dampRoll = - rollRate * 800;
+			const dampPitch = - pitchRate * dampFactor;
+			const dampRoll = - rollRate * dampFactor;
 			this._pushTorque(
 				this._right[ 0 ] * dampPitch + this._forward[ 0 ] * dampRoll,
 				this._right[ 1 ] * dampPitch + this._forward[ 1 ] * dampRoll,

@@ -105,10 +105,23 @@ export class VehicleSim {
         this.spherePos = spawnPos ? [ ...spawnPos ] : [ 3.5, 0.5, 5 ];
         this.quat = quatFromAxisAngle( [ 0, 1, 0 ], spawnAngle || 0 );
 
+        // Canonical spawn state for fall resets (RaceRoom may also set these after construction)
+        this.spawnPos = spawnPos ? [ ...spawnPos ] : [ 3.5, 0.5, 5 ];
+        this.spawnAngle = spawnAngle || 0;
+
         this.inputX = 0;
         this.inputZ = 0;
         this.touchActive = false;
         this.handbrake = false;
+        this.nitroInput = false;
+
+        // Nitro state (must match client Vehicle.js constants)
+        this.nitroGauge = 1;
+        this.nitroActive = false;
+        this._nitroPassiveRate = 0.04;
+        this._nitroDriftRate = 0.15;
+        this._nitroDrainRate = 0.35;
+        this._nitroBoostMult = 1.6;
 
         this.driftIntensity = 0;
         this.weatherType = 'clear';
@@ -156,6 +169,7 @@ export class VehicleSim {
         this.inputZ = input.z || 0;
         this.touchActive = !! input.touchActive;
         this.handbrake = !! input.handbrake;
+        this.nitroInput = !! input.nitro;
 
     }
 
@@ -214,6 +228,24 @@ export class VehicleSim {
         const linVel = this.body.motionProperties.linearVelocity;
         const angVel = this.body.motionProperties.angularVelocity;
 
+        // Guard: if the physics body produced NaN (solver edge-case), reset and skip frame.
+        // NaN propagates through all ArcadeVehicle force calculations and causes random
+        // stops/flips/invisible-wall behavior mid-track.
+        if ( ! isFinite( bquat[ 0 ] ) || ! isFinite( bquat[ 1 ] ) || ! isFinite( bquat[ 2 ] ) || ! isFinite( bquat[ 3 ] )
+            || ! isFinite( pos[ 0 ] ) || ! isFinite( pos[ 1 ] ) || ! isFinite( pos[ 2 ] )
+            || ! isFinite( linVel[ 0 ] ) || ! isFinite( linVel[ 1 ] ) || ! isFinite( linVel[ 2 ] ) ) {
+
+            const rp = this.spawnPos || [ 3.5, 0.5, 5 ];
+            const ra = this.spawnAngle || 0;
+            rigidBody.setPosition( this.world, this.body, rp, false );
+            rigidBody.setQuaternion( this.world, this.body, [ 0, Math.sin( ra / 2 ), 0, Math.cos( ra / 2 ) ], false );
+            rigidBody.setLinearVelocity( this.world, this.body, [ 0, 0, 0 ] );
+            rigidBody.setAngularVelocity( this.world, this.body, [ 0, 0, 0 ] );
+            this._arcadeVehicle.reset();
+            return;
+
+        }
+
         const cs = this._chassisState;
         cs.position[ 0 ] = pos[ 0 ]; cs.position[ 1 ] = pos[ 1 ]; cs.position[ 2 ] = pos[ 2 ];
         cs.quaternion[ 0 ] = bquat[ 0 ]; cs.quaternion[ 1 ] = bquat[ 1 ]; cs.quaternion[ 2 ] = bquat[ 2 ]; cs.quaternion[ 3 ] = bquat[ 3 ];
@@ -255,11 +287,28 @@ export class VehicleSim {
 
         }
 
+        // ── Nitro charge / drain ────────────────────────────
+        if ( this.nitroInput && this.nitroGauge > 0.01 ) {
+
+            this.nitroGauge = Math.max( 0, this.nitroGauge - this._nitroDrainRate * dt );
+            this.nitroActive = this.nitroGauge > 0;
+
+        } else {
+
+            this.nitroActive = false;
+            let chargeRate = this._nitroPassiveRate;
+            if ( this._arcadeVehicle.drifting ) chargeRate += this._nitroDriftRate;
+            this.nitroGauge = Math.min( 1, this.nitroGauge + chargeRate * dt );
+
+        }
+
+        const nitroMult = this.nitroActive ? this._nitroBoostMult : 1;
+
         // Propagate weather to arcade physics
         this._arcadeVehicle.weatherType = this.weatherType || 'clear';
 
         // Run arcade vehicle physics
-        const result = this._arcadeVehicle.update( dt, cs, { steer, throttle, brake, handbrake: this.handbrake }, this._rayResults );
+        const result = this._arcadeVehicle.update( dt, cs, { steer, throttle, brake, handbrake: this.handbrake, nitroMult }, this._rayResults );
 
         // Apply forces
         for ( let i = 0; i < result.forceCount; i++ ) {
@@ -372,9 +421,21 @@ export class VehicleSim {
 
             if ( this._useArcade ) {
 
-                // Read quaternion from chassis body directly
+                // Read quaternion from chassis body and re-normalize to prevent
+                // floating-point drift that accumulates over time and causes
+                // client slerp errors (NaN dot products, ghost snaps).
                 const q = this.body.quaternion;
-                this.quat = [ q[ 0 ], q[ 1 ], q[ 2 ], q[ 3 ] ];
+                const len = Math.sqrt( q[ 0 ] * q[ 0 ] + q[ 1 ] * q[ 1 ] + q[ 2 ] * q[ 2 ] + q[ 3 ] * q[ 3 ] );
+                if ( len > 0.0001 ) {
+
+                    const inv = 1 / len;
+                    this.quat = [ q[ 0 ] * inv, q[ 1 ] * inv, q[ 2 ] * inv, q[ 3 ] * inv ];
+
+                } else {
+
+                    this.quat = [ 0, 0, 0, 1 ];
+
+                }
 
             }
 
@@ -386,30 +447,34 @@ export class VehicleSim {
             dt
         );
 
-        // Fall reset
+        // Fall reset — teleport back to spawn position (not hardcoded)
         if ( this.spherePos[ 1 ] < -10 ) {
+
+            const resetPos = this.spawnPos || [ 3.5, 0.5, 5 ];
+            const resetAngle = this.spawnAngle || 0;
+            const resetQuat = [ 0, Math.sin( resetAngle / 2 ), 0, Math.cos( resetAngle / 2 ) ];
 
             if ( this.body ) {
 
-                rigidBody.setPosition( this.world, this.body, [ 3.5, 0.5, 5 ], false );
+                rigidBody.setPosition( this.world, this.body, resetPos, false );
                 rigidBody.setLinearVelocity( this.world, this.body, [ 0, 0, 0 ] );
                 rigidBody.setAngularVelocity( this.world, this.body, [ 0, 0, 0 ] );
 
                 if ( this._useArcade ) {
 
-                    rigidBody.setQuaternion( this.world, this.body, [ 0, 0, 0, 1 ], false );
+                    rigidBody.setQuaternion( this.world, this.body, resetQuat, false );
 
                 }
 
             }
 
-            this.spherePos[ 0 ] = 3.5;
-            this.spherePos[ 1 ] = 0.5;
-            this.spherePos[ 2 ] = 5;
+            this.spherePos[ 0 ] = resetPos[ 0 ];
+            this.spherePos[ 1 ] = resetPos[ 1 ];
+            this.spherePos[ 2 ] = resetPos[ 2 ];
             this.linearSpeed = 0;
             this.angularSpeed = 0;
             this.acceleration = 0;
-            this.quat = [ 0, 0, 0, 1 ];
+            this.quat = [ ...resetQuat ];
 
             if ( this._arcadeVehicle ) this._arcadeVehicle.reset();
 

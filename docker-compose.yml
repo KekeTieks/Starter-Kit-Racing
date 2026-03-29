@@ -27,7 +27,7 @@ services:
       - server_node_modules:/app/server/node_modules
     ports:
       - "2567:2567"
-    command: sh -c "npm install && npx nodemon --watch . --ext js,json --exec 'node index.js'"
+    command: sh -c "npm install && npx nodemon --watch . --ext js,json --legacy-watch --polling-interval 500 --exec 'node index.js'"
     environment:
       PORT:         2567
       DATABASE_URL: postgres://myrace:myrace_secret@db:5432/myrace

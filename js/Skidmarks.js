@@ -49,6 +49,7 @@ export class Skidmarks {
 
         }
         this._nextSlot = 0;
+        this._dirty = false;  // track whether buffers need GPU re-upload
 
         // BufferGeometry with dynamic buffers --------------------------------
         const geo = new THREE.BufferGeometry();
@@ -147,6 +148,7 @@ export class Skidmarks {
 
         // Tick all active segments
         let maxActive = 0;
+        let alphaChanged = false;
         for ( let i = 0; i < MAX_SEGMENTS; i++ ) {
 
             const seg = this._segments[ i ];
@@ -157,6 +159,7 @@ export class Skidmarks {
 
                 seg.life = 0;
                 this._writeAlpha( i, 0 );
+                alphaChanged = true;
                 continue;
 
             }
@@ -168,13 +171,23 @@ export class Skidmarks {
             const alpha    = fadeInT * fadeOutT * 0.82;
 
             this._writeAlpha( i, alpha );
+            alphaChanged = true;
             maxActive = i + 1;
 
         }
 
         const geo = this._mesh.geometry;
-        geo.attributes.position.needsUpdate = true;
-        geo.attributes.alpha.needsUpdate    = true;
+        if ( this._dirty ) {
+
+            geo.attributes.position.needsUpdate = true;
+            this._dirty = false;
+
+        }
+        if ( alphaChanged ) {
+
+            geo.attributes.alpha.needsUpdate = true;
+
+        }
         geo.setDrawRange( 0, maxActive * 6 );
 
     }
@@ -219,6 +232,7 @@ export class Skidmarks {
         _perp.crossVectors( _dir, _up ).normalize().multiplyScalar( SKID_WIDTH );
 
         this._emitSegment( emitter.prevPos, _wp, _perp );
+        this._dirty = true;
         emitter.prevPos.copy( _wp );
 
     }

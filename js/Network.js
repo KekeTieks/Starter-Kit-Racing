@@ -67,7 +67,9 @@ export class Network {
 
         } else {
 
-            this.room = await this.client.joinOrCreate( 'race', options );
+            // Always create a fresh room — joinOrCreate could send us
+            // into a stale/zombie room that still has available slots.
+            this.room = await this.client.create( 'race', options );
             this._joinedExistingRoom = false;
 
         }
@@ -147,6 +149,8 @@ export class Network {
                     // Server target position (lerp toward this)
                     sx: player.x, sy: player.y, sz: player.z,
                     sqx: player.qx, sqy: player.qy, sqz: player.qz, sqw: player.qw,
+                    // Server linear velocity (for reconciliation)
+                    svx: player.vx, svy: player.vy, svz: player.vz,
                     // Gameplay values (used directly, no lerp needed)
                     linearSpeed: player.linearSpeed,
                     acceleration: player.acceleration,
@@ -177,6 +181,7 @@ export class Network {
                 // Update server target
                 s.sx = player.x; s.sy = player.y; s.sz = player.z;
                 s.sqx = player.qx; s.sqy = player.qy; s.sqz = player.qz; s.sqw = player.qw;
+                s.svx = player.vx; s.svy = player.vy; s.svz = player.vz;
                 s.linearSpeed = player.linearSpeed;
                 s.acceleration = player.acceleration;
                 s.driftIntensity = player.driftIntensity;
@@ -253,8 +258,9 @@ export class Network {
         const z = input.z;
         const touch = !! input.touchActive;
         const hb = !! input.handbrake;
+        const nitro = !! input.nitro;
 
-        const changed = x !== this._lastInputX || z !== this._lastInputZ || touch !== this._lastTouchActive || hb !== this._lastHandbrake;
+        const changed = x !== this._lastInputX || z !== this._lastInputZ || touch !== this._lastTouchActive || hb !== this._lastHandbrake || nitro !== this._lastNitro;
 
         if ( changed ) {
 
@@ -262,15 +268,16 @@ export class Network {
             this._lastInputZ = z;
             this._lastTouchActive = touch;
             this._lastHandbrake = hb;
+            this._lastNitro = nitro;
             this._inputIdleFrames = 0;
-            this.room.send( 'input', { x, z, touchActive: touch, handbrake: hb } );
+            this.room.send( 'input', { x, z, touchActive: touch, handbrake: hb, nitro } );
 
         } else {
 
             this._inputIdleFrames++;
             if ( this._inputIdleFrames % 10 === 0 ) {
 
-                this.room.send( 'input', { x, z, touchActive: touch, handbrake: hb } );
+                this.room.send( 'input', { x, z, touchActive: touch, handbrake: hb, nitro } );
 
             }
 

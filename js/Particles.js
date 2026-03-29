@@ -5,24 +5,29 @@ const NITRO_POOL_SIZE = 80;
 const _worldPos = new THREE.Vector3();
 const _backward = new THREE.Vector3();
 
+// Shared smoke texture (loaded once, reused across all SmokeTrails instances)
+let _cachedSmokeMap = null;
+
 export class SmokeTrails {
 
 	constructor( scene ) {
 
 		this.particles = [];
 
-		const map = new THREE.TextureLoader().load( 'sprites/smoke.png' );
-		this.material = new THREE.SpriteMaterial( {
-			map,
-			transparent: true,
-			depthWrite: false,
-			opacity: 0,
-			color: 0x5E5F6B,
-		} );
+		if ( ! _cachedSmokeMap ) _cachedSmokeMap = new THREE.TextureLoader().load( 'sprites/smoke.png' );
+		const map = _cachedSmokeMap;
 
 		for ( let i = 0; i < POOL_SIZE; i ++ ) {
 
-			const sprite = new THREE.Sprite( this.material.clone() );
+			const mat = new THREE.SpriteMaterial( {
+				map,
+				transparent: true,
+				depthWrite: false,
+				opacity: 0,
+				color: 0x5E5F6B,
+			} );
+
+			const sprite = new THREE.Sprite( mat );
 			sprite.visible = false;
 			sprite.scale.setScalar( 0.25 );
 			scene.add( sprite );
@@ -101,8 +106,8 @@ export class SmokeTrails {
 
 		for ( const p of this.particles ) {
 
-			p.sprite.material.dispose();
 			scene.remove( p.sprite );
+			p.sprite.material.dispose();
 
 		}
 
@@ -152,7 +157,11 @@ const _NITRO_COLORS = [
 	new THREE.Color( 0xff3300 ),
 ];
 
+let _cachedNitroGlowTexture = null;
+
 function _nitroGlowTexture() {
+
+	if ( _cachedNitroGlowTexture ) return _cachedNitroGlowTexture;
 
 	const size = 64;
 	const canvas = document.createElement( 'canvas' );
@@ -166,8 +175,8 @@ function _nitroGlowTexture() {
 	grad.addColorStop( 1, 'rgba(255,50,0,0)' );
 	ctx.fillStyle = grad;
 	ctx.fillRect( 0, 0, size, size );
-	const tex = new THREE.CanvasTexture( canvas );
-	return tex;
+	_cachedNitroGlowTexture = new THREE.CanvasTexture( canvas );
+	return _cachedNitroGlowTexture;
 
 }
 
@@ -310,7 +319,6 @@ export class NitroFX {
 
 		for ( const p of this.particles ) {
 
-			p.sprite.material.map?.dispose();
 			p.sprite.material.dispose();
 			scene.remove( p.sprite );
 

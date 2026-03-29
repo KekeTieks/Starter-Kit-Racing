@@ -17,6 +17,11 @@ export default defineConfig( {
 			host: 'localhost',
 			port: 3000,
 		},
+		// Use polling for file watching inside Docker on Windows (inotify doesn't cross volume mounts)
+		watch: {
+			usePolling: true,
+			interval: 500,
+		},
 		// Proxy Colyseus in dev — in prod everything is served by the same express server
 		proxy: {
 			// REST endpoints

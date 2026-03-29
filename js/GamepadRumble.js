@@ -80,12 +80,12 @@ export class GamepadRumble {
 		// Continuous rumble — blend drift + speed + nitro
 		let weak = 0, strong = 0;
 
-		// Drift: moderate rumble on both motors
+		// Drift: light rumble on both motors
 		if ( this._drift > 0.15 ) {
 
 			const d = Math.min( this._drift, 1 );
-			weak   += d * 0.35;
-			strong += d * 0.20;
+			weak   += d * 0.15;
+			strong += d * 0.08;
 
 		}
 
@@ -94,23 +94,6 @@ export class GamepadRumble {
 
 			weak   += 0.25;
 			strong += 0.15;
-
-		}
-
-		// High speed: subtle low-frequency hum (strong motor only)
-		if ( this._speed > 0.6 ) {
-
-			const s = ( this._speed - 0.6 ) / 0.4; // 0-1 over [0.6, 1.0]
-			strong += s * 0.10;
-
-		}
-
-		// Acceleration: light rumble on strong motor, scales with throttle × speed buildup
-		if ( this._throttle > 0.1 ) {
-
-			const accelFeel = this._throttle * ( 1 - this._speed * 0.6 ); // stronger at low speed
-			strong += accelFeel * 0.12;
-			weak   += accelFeel * 0.05;
 
 		}
 

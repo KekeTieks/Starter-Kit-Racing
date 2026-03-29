@@ -16,8 +16,12 @@ export class Controls {
 		this.handbrake = false;
 		this.nitro = false;
 
-		window.addEventListener( 'keydown', ( e ) => this.keys[ e.code ] = true );
-		window.addEventListener( 'keyup',   ( e ) => this.keys[ e.code ] = false );
+		this._onKeyDown = ( e ) => this.keys[ e.code ] = true;
+		this._onKeyUp   = ( e ) => this.keys[ e.code ] = false;
+		window.addEventListener( 'keydown', this._onKeyDown );
+		window.addEventListener( 'keyup',   this._onKeyUp );
+
+		this._gpIndex = -1; // cached gamepad index
 
 		this._setupTouchUI();
 
@@ -82,6 +86,15 @@ export class Controls {
 
 	}
 
+	/** Remove all event listeners and touch UI. Call when returning to lobby. */
+	dispose() {
+
+		window.removeEventListener( 'keydown', this._onKeyDown );
+		window.removeEventListener( 'keyup',   this._onKeyUp );
+		this.destroyTouchUI();
+
+	}
+
 	update() {
 
 		let x = 0, z = 0;
@@ -92,17 +105,34 @@ export class Controls {
 		if ( this.keys[ 'KeyW' ] || this.keys[ 'ArrowUp' ] )    z += 1;
 		if ( this.keys[ 'KeyS' ] || this.keys[ 'ArrowDown' ] )  z -= 1;
 
-		// ── Gamepad ─────────────────────────────────────────────
-		const gamepads = navigator.getGamepads();
-		for ( const gp of gamepads ) {
+		// ── Gamepad (single poll, cached index) ─────────────────
+		let handbrake = !! this.keys[ 'Space' ];
+		let nitro = !! this.keys[ 'ShiftLeft' ] || !! this.keys[ 'ShiftRight' ];
 
-			if ( ! gp ) continue;
+		const gamepads = navigator.getGamepads();
+		let gp = this._gpIndex >= 0 ? gamepads[ this._gpIndex ] : null;
+
+		if ( ! gp ) {
+
+			// Re-scan for a connected gamepad
+			this._gpIndex = -1;
+			for ( let i = 0; i < gamepads.length; i ++ ) {
+
+				if ( gamepads[ i ] ) { gp = gamepads[ i ]; this._gpIndex = i; break; }
+
+			}
+
+		}
+
+		if ( gp ) {
+
 			const stickX = gp.axes[ 0 ];
 			if ( Math.abs( stickX ) > 0.15 ) x = stickX;
 			const rt = gp.buttons[ 7 ] ? gp.buttons[ 7 ].value : 0;
 			const lt = gp.buttons[ 6 ] ? gp.buttons[ 6 ].value : 0;
 			if ( rt > 0.1 || lt > 0.1 ) z = rt - lt;
-			break;
+			if ( gp.buttons[ 1 ] && gp.buttons[ 1 ].pressed ) handbrake = true;
+			if ( gp.buttons[ 0 ] && gp.buttons[ 0 ].pressed ) nitro = true;
 
 		}
 
@@ -120,21 +150,6 @@ export class Controls {
 				z = ( - jx + jy ) * Math.SQRT1_2;
 
 			}
-
-		}
-
-		// ── Handbrake & Nitro ────────────────────────────────
-		let handbrake = !! this.keys[ 'Space' ];
-		let nitro = !! this.keys[ 'ShiftLeft' ] || !! this.keys[ 'ShiftRight' ];
-
-		// Gamepad: B button (index 1) = handbrake, A button (index 0) = nitro
-		const gamepads2 = navigator.getGamepads();
-		for ( const gp of gamepads2 ) {
-
-			if ( ! gp ) continue;
-			if ( gp.buttons[ 1 ] && gp.buttons[ 1 ].pressed ) handbrake = true;
-			if ( gp.buttons[ 0 ] && gp.buttons[ 0 ].pressed ) nitro = true;
-			break;
 
 		}
 

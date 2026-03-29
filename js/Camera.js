@@ -13,12 +13,13 @@ export class Camera {
 		this.camera.position.copy( this.offset );
 		this.camera.lookAt( 0, 0, 0 );
 
-		window.addEventListener( 'resize', () => {
+		this._onResize = () => {
 
 			this.camera.aspect = window.innerWidth / window.innerHeight;
 			this.camera.updateProjectionMatrix();
 
-		} );
+		};
+		window.addEventListener( 'resize', this._onResize );
 
 	}
 
@@ -28,6 +29,13 @@ export class Camera {
 
 		this.camera.position.copy( this.targetPosition ).add( this.offset );
 		this.camera.lookAt( this.targetPosition );
+
+	}
+
+	/** Remove resize listener. Call when returning to lobby. */
+	dispose() {
+
+		window.removeEventListener( 'resize', this._onResize );
 
 	}
 

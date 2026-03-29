@@ -110,8 +110,19 @@ export function castWheelRay( world, origin, length, rayFilter ) {
 
     if ( _wheelRayCollector.hit.status === CastRayStatus.COLLIDING ) {
 
-        _wheelRayResult.hit = true;
-        _wheelRayResult.fraction = _wheelRayCollector.hit.fraction;
+        const frac = _wheelRayCollector.hit.fraction;
+
+        if ( isFinite( frac ) && frac >= 0 && frac <= 1 ) {
+
+            _wheelRayResult.hit = true;
+            _wheelRayResult.fraction = frac;
+
+        } else {
+
+            _wheelRayResult.hit = false;
+            _wheelRayResult.fraction = 1.0;
+
+        }
 
     } else {
 
@@ -126,6 +137,7 @@ export function castWheelRay( world, origin, length, rayFilter ) {
 
 function buildWallColliders( world, cells ) {
 
+    const wallBodies = new Set();
     const S = GRID_SCALE;
     const CELL_HALF = CELL_RAW / 2;
 
@@ -142,7 +154,7 @@ function buildWallColliders( world, cells ) {
     const ARC_CENTER_X = -CELL_HALF;
     const ARC_CENTER_Z = CELL_HALF;
     const OUTER_R = 2 * CELL_HALF - WALL_HALF_THICK;
-    const OUTER_SEG = 8;
+    const OUTER_SEG = 16;
     const OUTER_SEG_HALF_LEN = ( OUTER_R * ( Math.PI / 2 ) / OUTER_SEG / 2 ) * S;
     const INNER_R = WALL_HALF_THICK;
     const INNER_SEG = 3;
@@ -161,15 +173,15 @@ function buildWallColliders( world, cells ) {
             ];
             const quaternion = [ 0, Math.sin( -aMid / 2 ), 0, Math.cos( -aMid / 2 ) ];
 
-            rigidBody.create( world, {
+            wallBodies.add( rigidBody.create( world, {
                 shape: box.create( { halfExtents } ),
                 motionType: MotionType.STATIC,
                 objectLayer: world._OL_STATIC,
                 position,
                 quaternion,
                 friction: 0.0,
-                restitution: 0.4,
-            } );
+                restitution: 0.0,
+            } ) );
 
         }
 
@@ -194,15 +206,15 @@ function buildWallColliders( world, cells ) {
                 const wx = cx + ( lx * cr ) * S;
                 const wz = cz + ( -lx * sr ) * S;
 
-                rigidBody.create( world, {
+                wallBodies.add( rigidBody.create( world, {
                     shape: box.create( { halfExtents: [ hThick, hHeight, hLen ] } ),
                     motionType: MotionType.STATIC,
                     objectLayer: world._OL_STATIC,
                     position: [ wx, wallY, wz ],
                     quaternion: [ 0, Math.sin( rad / 2 ), 0, Math.cos( rad / 2 ) ],
                     friction: 0.0,
-                    restitution: 0.1,
-                } );
+                    restitution: 0.3,
+                } ) );
 
             }
 
@@ -218,6 +230,9 @@ function buildWallColliders( world, cells ) {
         }
 
     }
+
+    // Attach wall body set to world for contact listener filtering
+    world._wallBodies = wallBodies;
 
 }
 

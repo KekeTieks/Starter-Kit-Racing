@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-import { createWorldSettings, createWorld, addBroadphaseLayer, addObjectLayer, enableCollision, registerAll, updateWorld, rigidBody, box, MotionType } from 'crashcat';
+import { createWorldSettings, createWorld, addBroadphaseLayer, addObjectLayer, enableCollision, registerAll, updateWorld, rigidBody, box, MotionType, ContactValidateResult } from 'crashcat';
 import { Vehicle } from './Vehicle.js';
 import { RemoteVehicle } from './RemoteVehicle.js';
 import { Camera } from './Camera.js';
@@ -197,6 +197,8 @@ function initSinglePlayer( customCells, spawn, vehicleKey ) {
 	const vehicle = new Vehicle( vStats );
 	vehicle.rigidBody = sphereBody;
 	vehicle.physicsWorld = world;
+	vehicle._spawnPos = spawn ? [ ...spawn.position ] : [ 3.5, 0.5, 5 ];
+	vehicle._spawnAngle = spawn ? ( spawn.angle || 0 ) : 0;
 
 	if ( USE_ARCADE_VEHICLE ) {
 
@@ -245,53 +247,65 @@ function initSinglePlayer( customCells, spawn, vehicleKey ) {
 	};
 	window.addEventListener( 'keydown', _spHeadlightHandler );
 
-	const _forward = new THREE.Vector3();
+	const spWallBodies = world._wallBodies || new Set();
 
 	const contactListener = {
-		onContactAdded( bodyA, bodyB ) {
+		onContactValidate( bodyA, bodyB, _baseOffset, hit ) {
+
+			if ( bodyA !== sphereBody && bodyB !== sphereBody ) {
+
+				return ContactValidateResult.ACCEPT_ALL_CONTACTS_FOR_THIS_BODY_PAIR;
+
+			}
+
+			const otherBody = bodyA === sphereBody ? bodyB : bodyA;
+
+			if ( ! spWallBodies.has( otherBody ) ) {
+
+				return ContactValidateResult.ACCEPT_ALL_CONTACTS_FOR_THIS_BODY_PAIR;
+
+			}
+
+			// Reject contacts where the penetration axis is mostly vertical —
+			// real wall contacts are horizontal; ghost contacts at arc seam joints
+			// often produce normals with a large Y component.
+			const ax = hit.penetrationAxis;
+			const len2 = ax[ 0 ] * ax[ 0 ] + ax[ 1 ] * ax[ 1 ] + ax[ 2 ] * ax[ 2 ];
+
+			if ( len2 > 0.0001 && ( ax[ 1 ] * ax[ 1 ] / len2 ) > 0.5 ) {
+
+				return ContactValidateResult.REJECT_CONTACT;
+
+			}
+
+			return ContactValidateResult.ACCEPT_ALL_CONTACTS_FOR_THIS_BODY_PAIR;
+
+		},
+		onContactAdded( bodyA, bodyB, _manifold, settings ) {
 
 			if ( bodyA !== sphereBody && bodyB !== sphereBody ) return;
+
+			const otherBody = bodyA === sphereBody ? bodyB : bodyA;
+			if ( ! spWallBodies.has( otherBody ) ) return;
 
 			const vel = sphereBody.motionProperties.linearVelocity;
 			const speed = Math.sqrt( vel[ 0 ] * vel[ 0 ] + vel[ 2 ] * vel[ 2 ] );
 			audio.playImpact( speed );
 			rumble.collision( speed / 15 );
 
-			if ( speed > 0.5 ) {
+			// Inelastic wall response (restitution=0 eliminates bounce energy that
+			// amplifies phantom impulses at seam joints — Jolt Physics best practice)
+			settings.combinedRestitution = 0.0;
+			settings.combinedFriction = 0.85;
 
-				// Approximate wall normal from body positions
-				const wallBody = bodyA === sphereBody ? bodyB : bodyA;
-				const sp = sphereBody.position, wp = wallBody.position;
-				let nx = sp[ 0 ] - wp[ 0 ], nz = sp[ 2 ] - wp[ 2 ];
-				const nLen = Math.sqrt( nx * nx + nz * nz );
-				if ( nLen > 0.001 ) { nx /= nLen; nz /= nLen; } else { nx = 0; nz = 1; }
+		},
+		onContactPersisted( bodyA, bodyB, _manifold, settings ) {
 
-				// Decompose velocity: normal (into wall) and tangential (along wall)
-				const vDotN = vel[ 0 ] * nx + vel[ 2 ] * nz;
-
-				// Only penalize if moving toward the wall
-				if ( vDotN < 0 ) {
-
-					// Bounce: reflect normal component, scaled down
-					const bounceRestitution = 0.3;
-					const newVn = - vDotN * bounceRestitution;
-
-					// Friction along wall: lose some tangential speed on impact
-					const tangentFriction = Math.max( 0.85, 1 - Math.abs( vDotN ) * 0.03 );
-
-					// Tangential components
-					const tx = vel[ 0 ] - vDotN * nx;
-					const tz = vel[ 2 ] - vDotN * nz;
-
-					rigidBody.setLinearVelocity( world, sphereBody, [
-						tx * tangentFriction + nx * newVn,
-						vel[ 1 ],
-						tz * tangentFriction + nz * newVn
-					] );
-
-				}
-
-			}
+			if ( bodyA !== sphereBody && bodyB !== sphereBody ) return;
+			const otherBody = bodyA === sphereBody ? bodyB : bodyA;
+			if ( ! spWallBodies.has( otherBody ) ) return;
+			settings.combinedRestitution = 0.0;
+			settings.combinedFriction = 0.85;
 
 		}
 	};
@@ -426,23 +440,83 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 	let localVehicleReady = false;
 	let running = true;
 
-	const _forward = new THREE.Vector3();
+	const localWallBodies = localWorld._wallBodies || new Set();
 
 	const localContactListener = {
-		onContactAdded( bodyA, bodyB ) {
+		onContactValidate( bodyA, bodyB, _baseOffset, hit ) {
+
+			if ( ! localSphereBody ) return ContactValidateResult.ACCEPT_ALL_CONTACTS_FOR_THIS_BODY_PAIR;
+			if ( bodyA !== localSphereBody && bodyB !== localSphereBody ) {
+
+				return ContactValidateResult.ACCEPT_ALL_CONTACTS_FOR_THIS_BODY_PAIR;
+
+			}
+
+			const otherBody = bodyA === localSphereBody ? bodyB : bodyA;
+
+			if ( ! localWallBodies.has( otherBody ) ) {
+
+				return ContactValidateResult.ACCEPT_ALL_CONTACTS_FOR_THIS_BODY_PAIR;
+
+			}
+
+			// Reject contacts whose penetration axis is mostly vertical — ghost contacts
+			// at arc seam joints produce normals with a large Y component; real wall
+			// contacts are nearly horizontal.
+			const ax = hit.penetrationAxis;
+			const len2 = ax[ 0 ] * ax[ 0 ] + ax[ 1 ] * ax[ 1 ] + ax[ 2 ] * ax[ 2 ];
+
+			if ( len2 > 0.0001 && ( ax[ 1 ] * ax[ 1 ] / len2 ) > 0.5 ) {
+
+				return ContactValidateResult.REJECT_CONTACT;
+
+			}
+
+			return ContactValidateResult.ACCEPT_ALL_CONTACTS_FOR_THIS_BODY_PAIR;
+
+		},
+		onContactAdded( bodyA, bodyB, _manifold, settings ) {
 
 			if ( ! localSphereBody ) return;
 			if ( bodyA !== localSphereBody && bodyB !== localSphereBody ) return;
 
-			const vel = localSphereBody.motionProperties.linearVelocity;
-			const impactVelocity = Math.sqrt( vel[ 0 ] * vel[ 0 ] + vel[ 2 ] * vel[ 2 ] );
-			audio.playImpact( impactVelocity );
-			rumble.collision( impactVelocity / 15 );
+			const otherBody = bodyA === localSphereBody ? bodyB : bodyA;
 
-			// In multiplayer, the server is authoritative for speed penalties — only play sound locally.
-			// Slow down reconciliation for a few frames so physics can settle after the impact
-			// before server correction is applied (avoids flips/180s from mid-contact corrections).
-			vehicle._postContactFrames = 4;
+			if ( localWallBodies.has( otherBody ) ) {
+
+				settings.combinedRestitution = 0.0;
+				settings.combinedFriction = 0.85;
+
+				const vel = localSphereBody.motionProperties.linearVelocity;
+				const impactVelocity = Math.sqrt( vel[ 0 ] * vel[ 0 ] + vel[ 2 ] * vel[ 2 ] );
+				audio.playImpact( impactVelocity );
+				rumble.collision( impactVelocity / 15 );
+				vehicle._postContactFrames = 4;
+
+			} else {
+
+				settings.combinedRestitution = 0.0;
+
+			}
+
+		},
+		onContactPersisted( bodyA, bodyB, _manifold, settings ) {
+
+			if ( ! localSphereBody ) return;
+			if ( bodyA !== localSphereBody && bodyB !== localSphereBody ) return;
+
+			const otherBody = bodyA === localSphereBody ? bodyB : bodyA;
+
+			if ( localWallBodies.has( otherBody ) ) {
+
+				settings.combinedRestitution = 0.0;
+				settings.combinedFriction = 0.85;
+
+			} else {
+
+				settings.combinedRestitution = 0.0;
+
+			}
 
 		}
 	};
@@ -470,6 +544,7 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 				: createSphereBody( localWorld, spawnPos );
 			vehicle.rigidBody = localSphereBody;
 			vehicle.physicsWorld = localWorld;
+			vehicle.isMultiplayer = true;
 
 			if ( USE_ARCADE_VEHICLE ) {
 
@@ -635,8 +710,9 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 	// Apply rewards when the server confirms them
 	network.onRaceReward = ( data ) => {
 
-		profileService.applyRaceResult( data );
+		const { leveledUp, oldLevel, newLevel } = profileService.applyRaceResult( data );
 		hud.showRewardToast( data.xp_earned, data.credits_earned );
+		if ( leveledUp ) hud.showLevelUpToast( oldLevel, newLevel );
 
 	};
 
@@ -721,6 +797,11 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 		// Cleanup headlight key listener
 		window.removeEventListener( 'keydown', _mpHeadlightHandler );
 
+		// Dispose controls, camera and weather listeners
+		controls.dispose();
+		cam.dispose();
+		weather.dispose();
+
 		// Hide the canvas — the lobby is pure DOM, no need for a stale game frame behind it
 		renderer.domElement.classList.add( 'hidden' );
 
@@ -784,16 +865,27 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 
 			} else {
 
-				// Client-side prediction: run local physics for instant feedback
-				updateWorld( localWorld, localContactListener, dt );
-				vehicle.update( dt, input );
-
-				// Reconcile toward server authority
+				// Reconcile toward server authority BEFORE stepping local physics,
+				// so the prediction starts from the corrected state rather than
+				// accumulating a 1-frame lag that causes visible desync.
 				if ( myState ) {
 
 					vehicle.reconcileFromServer( myState );
 
 				}
+
+				// Sync proxy bodies to latest server positions BEFORE physics step
+				// so collisions are resolved against up-to-date positions, not stale ones.
+				for ( const [ sid, proxy ] of remoteProxyBodies ) {
+
+					const ps = network.getPlayerState( sid );
+					if ( ps ) rigidBody.setPosition( localWorld, proxy, [ ps.sx, ps.sy, ps.sz ], true );
+
+				}
+
+				// Client-side prediction: run local physics for instant feedback
+				updateWorld( localWorld, localContactListener, dt );
+				vehicle.update( dt, input );
 
 			}
 
@@ -823,7 +915,7 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 
 		}
 
-		// Remote players: lerp toward server + update proxy collision bodies
+		// Remote players: lerp toward server (proxy positions synced before updateWorld above)
 		for ( const [ sessionId, remote ] of remoteVehicles ) {
 
 			const state = network.getPlayerState( sessionId );
@@ -832,14 +924,6 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 			const rp = remoteParticles.get( sessionId );
 			if ( rp ) rp.update( dt, remote );
 			skidmarks.update( dt, remote );
-
-			// Move kinematic proxy body to match server position for local collision detection
-			const proxyBody = remoteProxyBodies.get( sessionId );
-			if ( proxyBody && state ) {
-
-				rigidBody.setPosition( localWorld, proxyBody, [ state.sx, state.sy, state.sz ], true );
-
-			}
 
 		}
 
@@ -931,7 +1015,13 @@ async function init() {
 
 	}
 
+	let _connectingInProgress = false;
+
 	async function startMultiplayer( roomId ) {
+
+		// Guard against double-click — ignore if already connecting
+		if ( _connectingInProgress ) return;
+		_connectingInProgress = true;
 
 		const vehicleKey = lobby.getVehicle();
 		const username   = lobby.getUsername();
@@ -948,13 +1038,18 @@ async function init() {
 
 			console.error( 'Connection failed:', e );
 			network.disconnect();
+			lobby._removeConnectingOverlay();
+			lobby._enableModeButtons();
 			const msg = e.message && e.message.includes( 'full' )
 				? 'Room is full. Try creating a new one.'
 				: e.message || 'Serveur inaccessible';
 			lobby.showError( msg );
+			_connectingInProgress = false;
 			return;
 
 		}
+
+		_connectingInProgress = false;
 
 		// Determine if this player is the host (first player in the room)
 		const isHost = ! roomId;
@@ -966,6 +1061,10 @@ async function init() {
 
 	// Helper: join a room by code (from mode screen)
 	async function joinByCode( code ) {
+
+		// Guard against double-click
+		if ( _connectingInProgress ) return;
+		_connectingInProgress = true;
 
 		const vehicleKey = lobby.getVehicle();
 		const username   = lobby.getUsername();
@@ -981,10 +1080,15 @@ async function init() {
 		} catch ( e ) {
 
 			network.disconnect();
+			lobby._removeConnectingOverlay();
+			lobby._enableModeButtons();
 			lobby.showError( e.message || 'Code invalide' );
+			_connectingInProgress = false;
 			return;
 
 		}
+
+		_connectingInProgress = false;
 
 		setupLobbyCallbacks( vehicleKey );
 		lobby.showRoom( network.roomId, false, network.roomCode );
@@ -1050,28 +1154,53 @@ async function init() {
 			if ( network.getMyState() ) { resolve(); return; }
 
 			const TIMEOUT_MS = 10000;
+			let settled = false;
+
+			const origAdd = network.onPlayerAdd;
+			const origDisconnect = network.onDisconnect;
+
+			// Restore original callbacks so stale wrappers don't linger
+			const cleanup = () => {
+
+				network.onPlayerAdd = origAdd;
+				network.onDisconnect = origDisconnect;
+
+			};
+
 			const timer = setTimeout( () => {
 
+				if ( settled ) return;
+				settled = true;
+				cleanup();
 				reject( new Error( 'Timeout: le serveur ne répond pas' ) );
 
 			}, TIMEOUT_MS );
 
-			const done = () => clearTimeout( timer );
-
-			const origAdd = network.onPlayerAdd;
 			network.onPlayerAdd = ( sessionId, color ) => {
 
 				if ( origAdd ) origAdd( sessionId, color );
-				if ( sessionId === network.sessionId ) { done(); resolve(); }
+				if ( sessionId === network.sessionId && ! settled ) {
+
+					settled = true;
+					clearTimeout( timer );
+					cleanup();
+					resolve();
+
+				}
 
 			};
 
-			const origDisconnect = network.onDisconnect;
 			network.onDisconnect = ( code ) => {
 
 				if ( origDisconnect ) origDisconnect( code );
-				done();
-				reject( new Error( 'Connexion perdue' ) );
+				if ( ! settled ) {
+
+					settled = true;
+					clearTimeout( timer );
+					cleanup();
+					reject( new Error( 'Connexion perdue' ) );
+
+				}
 
 			};
 

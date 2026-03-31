@@ -1,6 +1,5 @@
-import { TRACK_CELLS } from './Track.js';
-
-const LS_KEY = 'racing_circuits';
+import { profileService } from './ProfileService.js';
+import { parseCell } from './CellFormat.js';
 
 // Colors per track piece type for the minimap SVG
 const MINIMAP_COLORS = {
@@ -11,93 +10,69 @@ const MINIMAP_COLORS = {
 	'track-ramp':     '#dd9944',
 };
 
-const BUILTIN_CIRCUITS = [
-	{ id: 'builtin-classic', name: 'Classic Loop', cells: TRACK_CELLS, builtin: true },
-];
+export async function loadCircuits() {
 
-export function loadCircuits() {
+	const username = profileService.username;
+	const url = username
+		? '/api/circuits?username=' + encodeURIComponent( username )
+		: '/api/circuits';
 
-	let custom = [];
+	const res = await fetch( url );
+	if ( ! res.ok ) throw new Error( 'Failed to load circuits' );
 
-	try {
-
-		const raw = localStorage.getItem( LS_KEY );
-		if ( raw ) custom = JSON.parse( raw );
-
-	} catch ( _e ) {
-
-		custom = [];
-
-	}
-
-	return [ ...BUILTIN_CIRCUITS, ...custom ];
+	const data = await res.json();
+	return data.circuits;
 
 }
 
-export function saveCircuit( name, cells ) {
+export async function saveCircuit( name, cells ) {
 
-	let custom = [];
+	const username = profileService.username;
 
-	try {
+	const res = await fetch( '/api/circuits', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify( { cells, name, username } ),
+	} );
 
-		const raw = localStorage.getItem( LS_KEY );
-		if ( raw ) custom = JSON.parse( raw );
+	if ( ! res.ok ) throw new Error( 'Failed to save circuit' );
 
-	} catch ( _e ) {
-
-		custom = [];
-
-	}
-
-	const id = 'custom-' + Date.now();
-	custom.push( { id, name, cells, createdAt: Date.now(), builtin: false } );
-	localStorage.setItem( LS_KEY, JSON.stringify( custom ) );
-	return id;
+	const data = await res.json();
+	return data.circuit;
 
 }
 
-export function updateCircuit( id, cells ) {
+export async function updateCircuit( id, cells, name ) {
 
-	let custom = [];
+	const username = profileService.username;
 
-	try {
+	const body = { username };
+	if ( cells ) body.cells = cells;
+	if ( name !== undefined ) body.name = name;
 
-		const raw = localStorage.getItem( LS_KEY );
-		if ( raw ) custom = JSON.parse( raw );
+	const res = await fetch( '/api/circuits/' + id, {
+		method: 'PUT',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify( body ),
+	} );
 
-	} catch ( _e ) {
+	if ( ! res.ok ) throw new Error( 'Failed to update circuit' );
 
-		custom = [];
-
-	}
-
-	const idx = custom.findIndex( ( c ) => c.id === id );
-	if ( idx !== - 1 ) {
-
-		custom[ idx ] = { ...custom[ idx ], cells, updatedAt: Date.now() };
-		localStorage.setItem( LS_KEY, JSON.stringify( custom ) );
-
-	}
+	const data = await res.json();
+	return data.circuit;
 
 }
 
-export function deleteCircuit( id ) {
+export async function deleteCircuit( id ) {
 
-	let custom = [];
+	const username = profileService.username;
 
-	try {
+	const res = await fetch(
+		'/api/circuits/' + id + '?username=' + encodeURIComponent( username ),
+		{ method: 'DELETE' }
+	);
 
-		const raw = localStorage.getItem( LS_KEY );
-		if ( raw ) custom = JSON.parse( raw );
-
-	} catch ( _e ) {
-
-		custom = [];
-
-	}
-
-	custom = custom.filter( ( c ) => c.id !== id );
-	localStorage.setItem( LS_KEY, JSON.stringify( custom ) );
+	if ( ! res.ok ) throw new Error( 'Failed to delete circuit' );
 
 }
 
@@ -105,12 +80,12 @@ export function generateMinimap( cells, size = 80 ) {
 
 	if ( ! cells || cells.length === 0 ) return '<svg></svg>';
 
-	const gxs = cells.map( ( c ) => c[ 0 ] );
-	const gzs = cells.map( ( c ) => c[ 1 ] );
-	const minX = Math.min( ...gxs );
-	const maxX = Math.max( ...gxs );
-	const minZ = Math.min( ...gzs );
-	const maxZ = Math.max( ...gzs );
+	const parsed = cells.map( parseCell );
+
+	const minX = Math.min( ...parsed.map( c => c.gx ) );
+	const maxX = Math.max( ...parsed.map( c => c.gx ) );
+	const minZ = Math.min( ...parsed.map( c => c.gz ) );
+	const maxZ = Math.max( ...parsed.map( c => c.gz ) );
 
 	const cols = maxX - minX + 1;
 	const rows = maxZ - minZ + 1;
@@ -119,11 +94,11 @@ export function generateMinimap( cells, size = 80 ) {
 	const w = cols * cellSize;
 	const h = rows * cellSize;
 
-	const rects = cells.map( ( c ) => {
+	const rects = parsed.map( ( c ) => {
 
-		const x = ( c[ 0 ] - minX ) * cellSize;
-		const y = ( c[ 1 ] - minZ ) * cellSize;
-		const color = MINIMAP_COLORS[ c[ 2 ] ] || '#aaaaaa';
+		const x = ( c.gx - minX ) * cellSize;
+		const y = ( c.gz - minZ ) * cellSize;
+		const color = MINIMAP_COLORS[ c.type ] || '#aaaaaa';
 		return `<rect x="${ x }" y="${ y }" width="${ cellSize }" height="${ cellSize }" fill="${ color }" rx="1"/>`;
 
 	} ).join( '' );

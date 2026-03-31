@@ -83,6 +83,10 @@ export class RaceRoom extends Room {
         console.log( `Room ${ this.roomId } weather: ${ this.state.weather }` );
 
         this.trackCells = rawMap ? JSON.parse( rawMap ) : DEFAULT_CELLS;
+        const sampleCell = this.trackCells[ 0 ];
+        console.log( `[RaceRoom] cells: ${ this.trackCells.length }, sample[0]:`, JSON.stringify( sampleCell ) );
+        const bumpy = this.trackCells.filter( c => c.isBump === true || ( Array.isArray(c) && c[5] === true ) );
+        if ( bumpy.length ) console.log( `[RaceRoom] WARNING: ${ bumpy.length } bump cells detected` );
         this.world = initPhysics( this.trackCells );
         this._rayFilter = USE_ARCADE_VEHICLE ? initRayFilter( this.world ) : null;
         this.sims = new Map();
@@ -104,10 +108,10 @@ export class RaceRoom extends Room {
         // tune restitution/friction via the settings object.
         // NEVER call setLinearVelocity / setAngularVelocity inside callbacks —
         // that fights the constraint solver and produces ghost 180s.
-        const wallBodies = this.world._wallBodies || new Set();
-
         this.contactListener = {
             onContactValidate: ( bodyA, bodyB, _baseOffset, hit ) => {
+
+                const wallBodies = this.world._wallBodies || new Set();
 
                 for ( const [ , sim ] of this.sims ) {
 
@@ -140,6 +144,8 @@ export class RaceRoom extends Room {
             },
             onContactAdded: ( bodyA, bodyB, _manifold, settings ) => {
 
+                const wallBodies = this.world._wallBodies || new Set();
+
                 for ( const [ sessionId, sim ] of this.sims ) {
 
                     if ( bodyA === sim.body || bodyB === sim.body ) {
@@ -167,6 +173,8 @@ export class RaceRoom extends Room {
 
             },
             onContactPersisted: ( bodyA, bodyB, _manifold, settings ) => {
+
+                const wallBodies = this.world._wallBodies || new Set();
 
                 for ( const [ , sim ] of this.sims ) {
 
@@ -281,6 +289,10 @@ export class RaceRoom extends Room {
             // Rebuild track and physics world with new map
             this.state.mapData = data;
             this.trackCells = data ? JSON.parse( data ) : DEFAULT_CELLS;
+            const setMapSample = this.trackCells[ 0 ];
+            console.log( `[RaceRoom setMap] cells: ${ this.trackCells.length }, sample[0]:`, JSON.stringify( setMapSample ) );
+            const setMapBumpy = this.trackCells.filter( c => c.isBump === true || ( Array.isArray( c ) && c[ 5 ] === true ) );
+            if ( setMapBumpy.length ) console.log( `[RaceRoom setMap] WARNING: ${ setMapBumpy.length } bump cells detected` );
             this.world = initPhysics( this.trackCells );
             this._rayFilter = USE_ARCADE_VEHICLE ? initRayFilter( this.world ) : null;
             this.finishLine = computeFinishLine( this.trackCells );
@@ -543,7 +555,7 @@ export class RaceRoom extends Room {
 
     tick( deltaMs ) {
 
-        const dt = deltaMs / 1000;
+        const dt = Math.min( deltaMs / 1000, 1 / 20 ); // cap at 50ms to prevent tunnelling on lag spikes
         const isFrozen = this.state.mode === 'race' &&
             ( this.state.phase === 'countdown' || this.state.phase === 'finished' );
 

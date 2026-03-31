@@ -9,7 +9,7 @@ import authRouter     from './routes/auth.js';
 import profileRouter  from './routes/profile.js';
 import upgradesRouter from './routes/upgrades.js';
 import cosmeticsRouter from './routes/cosmetics.js';
-import circuitsRouter from './routes/circuits.js';
+import circuitsRouter, { seedBuiltinCircuits } from './routes/circuits.js';
 
 const __dirname = path.dirname( fileURLToPath( import.meta.url ) );
 const port = parseInt( process.env.PORT || '2567' );
@@ -20,6 +20,7 @@ const publicDir = process.env.NODE_ENV === 'production'
 
 // ── Run DB migrations before starting the server ──────────────────────────────
 await migrate();
+await seedBuiltinCircuits();
 
 // ─────────────────────────────────────────────────────────────────────────────
 

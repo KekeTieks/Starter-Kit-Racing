@@ -3,7 +3,8 @@
 // Also: mesh placement, cell resolution, persistence, and history management.
 
 import * as THREE from 'three';
-import { ORIENT_DEG, CELL_RAW, decodeCells, buildRampMesh } from '../Track.js';
+import { ORIENT_DEG, CELL_RAW, buildRampMesh } from '../Track.js';
+import { parseCell, serializeCell } from '../CellFormat.js';
 import { grid, state, history, redoStack, MAX_HISTORY, cellKey } from './EditorState.js';
 import { models } from './EditorModels.js';
 import { trackGroup } from './EditorScene.js';
@@ -442,27 +443,7 @@ export function getCellsArray() {
 	for ( const [ key, cell ] of grid ) {
 
 		const [ gx, gz ] = key.split( ',' ).map( Number );
-
-		if ( cell.type === 'track-ramp' ) {
-
-			// Format: [gx, gz, 'track-ramp', orient, isCheckpoint, rampLength, rampAngle, rampWidth]
-			arr.push( [
-				gx, gz, 'track-ramp', cell.orient,
-				cell.isCheckpoint ? true : false,
-				cell.rampLength ?? 1.0,
-				cell.rampAngle  ?? 15,
-				cell.rampWidth  ?? 1.0,
-			] );
-
-		} else {
-
-			// Format: [gx, gz, type, orient, isCheckpoint?, isBump?, bumpOrient?]
-			const entry = [ gx, gz, cell.type, cell.orient ];
-			if ( cell.isCheckpoint || cell.isBump ) entry.push( cell.isCheckpoint ? true : false );
-			if ( cell.isBump ) { entry.push( true ); entry.push( cell.bumpOrient ?? cell.orient ); }
-			arr.push( entry );
-
-		}
+		arr.push( serializeCell( gx, gz, cell ) );
 
 	}
 
@@ -480,37 +461,27 @@ function loadCellsArray( arr ) {
 
 	for ( const entry of arr ) {
 
-		const [ gx, gz, type, orient ] = entry;
-		const isCheckpoint = entry[ 4 ] === true;
-		const isFinish = ( type === 'track-finish' );
-		let cell;
+		const c = parseCell( entry );
+		const cell = {
+			type:         c.type,
+			orient:       c.orient,
+			isFinish:     c.type === 'track-finish',
+			isCheckpoint: c.isCheckpoint,
+			isBump:       c.isBump,
+			bumpOrient:   c.bumpOrient,
+			rampLength:   c.rampLength,
+			rampAngle:    c.rampAngle,
+			rampWidth:    c.rampWidth,
+			mesh: null, bumpMesh: null, cpMarker: null,
+		};
 
-		if ( type === 'track-ramp' ) {
+		grid.set( cellKey( c.gx, c.gz ), cell );
+		placeMesh( c.gx, c.gz, cell );
 
-			cell = {
-				type, orient, isFinish: false, isCheckpoint,
-				isBump: false, bumpOrient: undefined,
-				rampLength: entry[ 5 ] ?? 1.0,
-				rampAngle:  entry[ 6 ] ?? 15,
-				rampWidth:  entry[ 7 ] ?? 1.0,
-				mesh: null, bumpMesh: null, cpMarker: null,
-			};
-
-		} else {
-
-			const isBump = entry[ 5 ] === true;
-			const bumpOrient = entry[ 6 ] !== undefined ? entry[ 6 ] : orient;
-			cell = { type, orient, isFinish, isCheckpoint, isBump, bumpOrient, mesh: null, bumpMesh: null, cpMarker: null };
-
-		}
-
-		grid.set( cellKey( gx, gz ), cell );
-		placeMesh( gx, gz, cell );
-
-		if ( isCheckpoint ) {
+		if ( c.isCheckpoint ) {
 
 			const marker = new THREE.Mesh( cpMarkerGeo, cpMarkerMat );
-			marker.position.set( ( gx + 0.5 ) * CELL_RAW, 3.5, ( gz + 0.5 ) * CELL_RAW );
+			marker.position.set( ( c.gx + 0.5 ) * CELL_RAW, 3.5, ( c.gz + 0.5 ) * CELL_RAW );
 			trackGroup.add( marker );
 			cell.cpMarker = marker;
 
@@ -522,30 +493,15 @@ function loadCellsArray( arr ) {
 
 export function loadSaved() {
 
-	const params = new URLSearchParams( window.location.search );
-	const mapParam = params.get( 'map' );
-
 	try {
 
-		// Priority: ?map= URL param (legacy base64, no ramps) → v2 JSON localStorage
-		if ( mapParam ) {
+		const raw = localStorage.getItem( 'racing-editor-cells-v2' );
+		if ( raw ) {
 
-			loadCellsArray( decodeCells( mapParam ) );
-			return;
-
-		}
-
-		const v2 = localStorage.getItem( 'racing-editor-cells-v2' );
-		if ( v2 ) {
-
-			loadCellsArray( JSON.parse( v2 ) );
-			return;
+			// parseCell handles both old array format and new object format transparently
+			loadCellsArray( JSON.parse( raw ) );
 
 		}
-
-		// Fallback: legacy base64 localStorage (no ramps, but preserves old circuits)
-		const legacy = localStorage.getItem( 'racing-editor-cells' );
-		if ( legacy ) loadCellsArray( decodeCells( legacy ) );
 
 	} catch ( e ) {
 

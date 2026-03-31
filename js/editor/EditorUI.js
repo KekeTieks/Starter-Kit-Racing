@@ -2,6 +2,7 @@
 // Toolbar, toast, modal Save, modal Load, circuit validation UI.
 
 import { saveCircuit, updateCircuit, loadCircuits, deleteCircuit, generateMinimap } from '../CircuitLibrary.js';
+import { parseCell } from '../CellFormat.js';
 import { state } from './EditorState.js';
 import { grid, cellKey } from './EditorState.js';
 import { getCellsArray, save, clearAll, validateCircuit, placeFinish, loadSaved, placeRamp } from './EditorCells.js';
@@ -81,8 +82,8 @@ export function initToolbarListeners() {
 			} );
 
 			if ( ! res.ok ) throw new Error( 'Server error' );
-			const { id } = await res.json();
-			window.open( 'index.html?circuit=' + id, '_blank' );
+			const { circuit } = await res.json();
+			window.open( 'index.html?circuit=' + circuit.id, '_blank' );
 
 		} catch {
 
@@ -105,9 +106,9 @@ export function initToolbarListeners() {
 			} );
 
 			if ( ! res.ok ) throw new Error( 'Server error' );
-			const { id } = await res.json();
+			const { circuit } = await res.json();
 			const base = window.location.href.replace( /editor\.html.*/, '' );
-			const url = base + 'index.html?circuit=' + id;
+			const url = base + 'index.html?circuit=' + circuit.id;
 			navigator.clipboard.writeText( url )
 				.then( () => showToast( 'Lien copié !' ) )
 				.catch( () => showToast( url ) );
@@ -198,23 +199,32 @@ export function initSaveModal() {
 
 	}
 
-	function confirmSave() {
+	async function confirmSave() {
 
 		const cells = getCellsArray();
 
-		if ( state.currentCircuitId !== null ) {
+		try {
 
-			updateCircuit( state.currentCircuitId, cells );
-			showToast( `"${ state.currentCircuitName }" mis à jour !` );
+			if ( state.currentCircuitId !== null ) {
 
-		} else {
+				await updateCircuit( state.currentCircuitId, cells );
+				save();
+				showToast( `"${ state.currentCircuitName }" mis à jour !` );
 
-			const name = modalSaveName.value.trim();
-			if ( ! name ) return;
-			const newId = saveCircuit( name, cells );
-			state.currentCircuitId = newId;
-			state.currentCircuitName = name;
-			showToast( `"${ name }" sauvegardé !` );
+			} else {
+
+				const name = modalSaveName.value.trim();
+				if ( ! name ) return;
+				const circuit = await saveCircuit( name, cells );
+				state.currentCircuitId = circuit.id;
+				state.currentCircuitName = circuit.name;
+				showToast( `"${ name }" sauvegardé !` );
+
+			}
+
+		} catch {
+
+			showToast( 'Erreur serveur, impossible de sauvegarder.' );
 
 		}
 
@@ -233,14 +243,24 @@ export function initSaveModal() {
 		btnAsNew.style.display = 'none';
 		document.getElementById( 'modal-save-confirm' ).textContent = 'Sauvegarder';
 
-		document.getElementById( 'modal-save-confirm' ).onclick = () => {
+		document.getElementById( 'modal-save-confirm' ).onclick = async () => {
 
 			const name = modalSaveName.value.trim();
 			if ( ! name ) return;
-			const newId = saveCircuit( name, getCellsArray() );
-			state.currentCircuitId = newId;
-			state.currentCircuitName = name;
-			showToast( `"${ name }" sauvegardé !` );
+
+			try {
+
+				const circuit = await saveCircuit( name, getCellsArray() );
+				state.currentCircuitId = circuit.id;
+				state.currentCircuitName = circuit.name;
+				showToast( `"${ name }" sauvegardé !` );
+
+			} catch {
+
+				showToast( 'Erreur serveur, impossible de sauvegarder.' );
+
+			}
+
 			closeSaveModal();
 			document.getElementById( 'modal-save-confirm' ).onclick = null;
 
@@ -284,19 +304,26 @@ export function initLoadModal() {
 
 		for ( const entry of cells ) {
 
-			const [ gx, gz, type, orient ] = entry;
-			const isCheckpoint = entry[ 4 ] === true;
-			const isBump = entry[ 5 ] === true;
-			const bumpOrient = entry[ 6 ] !== undefined ? entry[ 6 ] : orient;
-			const isFinish = ( type === 'track-finish' );
-			const cell = { type, orient, isFinish, isCheckpoint, isBump, bumpOrient, mesh: null, bumpMesh: null, cpMarker: null };
-			grid.set( cellKey( gx, gz ), cell );
-			placeMesh( gx, gz, cell );
+			const c = parseCell( entry );
+			const cell = {
+				type:         c.type,
+				orient:       c.orient,
+				isFinish:     c.type === 'track-finish',
+				isCheckpoint: c.isCheckpoint,
+				isBump:       c.isBump,
+				bumpOrient:   c.bumpOrient,
+				rampLength:   c.rampLength,
+				rampAngle:    c.rampAngle,
+				rampWidth:    c.rampWidth,
+				mesh: null, bumpMesh: null, cpMarker: null,
+			};
+			grid.set( cellKey( c.gx, c.gz ), cell );
+			placeMesh( c.gx, c.gz, cell );
 
-			if ( isCheckpoint ) {
+			if ( c.isCheckpoint ) {
 
 				const marker = new THREE.Mesh( cpMarkerGeo, cpMarkerMat );
-				marker.position.set( ( gx + 0.5 ) * CELL_RAW, 3.5, ( gz + 0.5 ) * CELL_RAW );
+				marker.position.set( ( c.gx + 0.5 ) * CELL_RAW, 3.5, ( c.gz + 0.5 ) * CELL_RAW );
 				trackGroup.add( marker );
 				cell.cpMarker = marker;
 
@@ -313,10 +340,25 @@ export function initLoadModal() {
 
 	}
 
-	function openLoadModal() {
+	async function openLoadModal() {
 
-		const circuits = loadCircuits();
 		const list = document.getElementById( 'modal-load-list' );
+		list.innerHTML = '<div class="library-empty">Chargement…</div>';
+		modalLoad.classList.add( 'open' );
+
+		let circuits;
+
+		try {
+
+			circuits = await loadCircuits();
+
+		} catch {
+
+			list.innerHTML = '<div class="library-empty">Erreur de chargement</div>';
+			return;
+
+		}
+
 		list.innerHTML = '';
 
 		if ( circuits.length === 0 ) {
@@ -336,7 +378,7 @@ export function initLoadModal() {
 				item.innerHTML = `
 					<div class="lib-minimap">${ minimap }</div>
 					<div class="lib-info">
-						<div class="lib-name">${ circ.name }</div>
+						<div class="lib-name">${ circ.name || 'Sans nom' }</div>
 						<div class="lib-tag">${ tag }</div>
 					</div>
 					${ circ.builtin ? '' : `<button class="lib-delete" data-id="${ circ.id }" title="Supprimer">✕</button>` }
@@ -348,10 +390,21 @@ export function initLoadModal() {
 
 				if ( ! circ.builtin ) {
 
-					item.querySelector( '.lib-delete' ).addEventListener( 'click', ( e ) => {
+					item.querySelector( '.lib-delete' ).addEventListener( 'click', async ( e ) => {
 
 						e.stopPropagation();
-						deleteCircuit( circ.id );
+
+						try {
+
+							await deleteCircuit( circ.id );
+
+						} catch {
+
+							showToast( 'Erreur lors de la suppression.' );
+							return;
+
+						}
+
 						openLoadModal();
 
 					} );
@@ -363,8 +416,6 @@ export function initLoadModal() {
 			}
 
 		}
-
-		modalLoad.classList.add( 'open' );
 
 	}
 

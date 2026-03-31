@@ -1,5 +1,7 @@
 // Track data utilities for Node.js (no Three.js dependency)
 
+import { parseCell } from '../../js/CellFormat.js';
+
 export const ORIENT_DEG = { 0: 0, 10: 180, 16: 90, 22: 270 };
 export const CELL_RAW = 9.99;
 export const GRID_SCALE = 0.75;
@@ -25,28 +27,21 @@ export const DEFAULT_CELLS = [
 
 export function computeSpawnPosition( cells ) {
 
-    let cell = cells[ 0 ];
+    let found = null;
 
-    for ( const c of cells ) {
+    for ( const entry of cells ) {
 
-        if ( c[ 2 ] === 'track-finish' ) {
-
-            cell = c;
-            break;
-
-        }
+        const c = parseCell( entry );
+        if ( c.type === 'track-finish' ) { found = c; break; }
 
     }
 
-    if ( ! cell ) return { position: [ 3.5, 0.5, 5 ], angle: 0 };
+    if ( ! found ) found = parseCell( cells[ 0 ] );
+    if ( ! found ) return { position: [ 3.5, 0.5, 5 ], angle: 0 };
 
-    const gx = cell[ 0 ];
-    const gz = cell[ 1 ];
-    const x = ( gx + 0.5 ) * CELL_RAW * GRID_SCALE;
-    const z = ( gz + 0.5 ) * CELL_RAW * GRID_SCALE;
-
-    const orient = cell[ 3 ];
-    const deg = ORIENT_DEG[ orient ] || 0;
+    const x = ( found.gx + 0.5 ) * CELL_RAW * GRID_SCALE;
+    const z = ( found.gz + 0.5 ) * CELL_RAW * GRID_SCALE;
+    const deg = ORIENT_DEG[ found.orient ] || 0;
     const angle = deg * Math.PI / 180;
 
     return { position: [ x, 0.5, z ], angle };
@@ -86,15 +81,22 @@ export function computeSpawnPositions( cells, count ) {
 
 export function computeFinishLine( cells ) {
 
-    const finishCell = cells.find( c => c[ 2 ] === 'track-finish' );
+    let finishCell = null;
+
+    for ( const entry of cells ) {
+
+        const c = parseCell( entry );
+        if ( c.type === 'track-finish' ) { finishCell = c; break; }
+
+    }
+
     if ( ! finishCell ) return null;
 
-    const [ gx, gz, , orient ] = finishCell;
-    const deg = ORIENT_DEG[ orient ] || 0;
+    const deg = ORIENT_DEG[ finishCell.orient ] || 0;
     const rad = deg * Math.PI / 180;
 
-    const cx = ( gx + 0.5 ) * CELL_RAW * GRID_SCALE;
-    const cz = ( gz + 0.5 ) * CELL_RAW * GRID_SCALE;
+    const cx = ( finishCell.gx + 0.5 ) * CELL_RAW * GRID_SCALE;
+    const cz = ( finishCell.gz + 0.5 ) * CELL_RAW * GRID_SCALE;
 
     return {
         cx, cz,
@@ -109,29 +111,30 @@ export function computeFinishLine( cells ) {
 
 export function computeCheckpoints( cells ) {
 
-    // Use manually placed checkpoints if any exist (cell[4] === true)
-    const manual = cells.filter( c => c[ 4 ] === true );
+    // Use manually placed checkpoints if any (isCheckpoint === true)
+    const parsed = cells.map( parseCell );
+    const manual = parsed.filter( c => c.isCheckpoint );
 
     if ( manual.length > 0 ) {
 
         return manual.map( c => ( {
-            cx: ( c[ 0 ] + 0.5 ) * CELL_RAW * GRID_SCALE,
-            cz: ( c[ 1 ] + 0.5 ) * CELL_RAW * GRID_SCALE,
+            cx: ( c.gx + 0.5 ) * CELL_RAW * GRID_SCALE,
+            cz: ( c.gz + 0.5 ) * CELL_RAW * GRID_SCALE,
             radius: CELL_RAW * GRID_SCALE * 0.6,
         } ) );
 
     }
 
     // Fallback: pick the cell farthest from finish
-    const finishCell = cells.find( c => c[ 2 ] === 'track-finish' );
+    const finishCell = parsed.find( c => c.type === 'track-finish' );
     if ( ! finishCell ) return [];
 
     let maxDist = 0;
-    let cpCell = cells[ 0 ];
+    let cpCell = parsed[ 0 ];
 
-    for ( const cell of cells ) {
+    for ( const cell of parsed ) {
 
-        const d = Math.abs( cell[ 0 ] - finishCell[ 0 ] ) + Math.abs( cell[ 1 ] - finishCell[ 1 ] );
+        const d = Math.abs( cell.gx - finishCell.gx ) + Math.abs( cell.gz - finishCell.gz );
         if ( d > maxDist ) {
 
             maxDist = d;
@@ -142,8 +145,8 @@ export function computeCheckpoints( cells ) {
     }
 
     return [ {
-        cx: ( cpCell[ 0 ] + 0.5 ) * CELL_RAW * GRID_SCALE,
-        cz: ( cpCell[ 1 ] + 0.5 ) * CELL_RAW * GRID_SCALE,
+        cx: ( cpCell.gx + 0.5 ) * CELL_RAW * GRID_SCALE,
+        cz: ( cpCell.gz + 0.5 ) * CELL_RAW * GRID_SCALE,
         radius: CELL_RAW * GRID_SCALE * 0.6,
     } ];
 

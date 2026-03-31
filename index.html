@@ -2011,14 +2011,6 @@
 	<div id="lobby"></div>
 	<div id="race-hud"></div>
 	<a id="editor-link" href="editor.html">Create your own track</a>
-	<script>
-		const map = new URLSearchParams( location.search ).get( 'map' );
-		if ( map ) {
-			const link = document.getElementById( 'editor-link' );
-			link.href = 'editor.html?map=' + map;
-			link.textContent = 'Edit this track';
-		}
-	</script>
 	<script type="module" src="js/main.js"></script>
 </body>
 </html>

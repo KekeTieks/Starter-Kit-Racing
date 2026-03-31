@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { parseCell } from './CellFormat.js';
 
 export const ORIENT_DEG = { 0: 0, 10: 180, 16: 90, 22: 270 };
 
@@ -179,20 +180,15 @@ export function buildTrack( scene, models, customCells ) {
 
 	for ( const entry of cells ) {
 
-		const [ gx, gz, key, orient ] = entry;
-		const isBump = entry[ 5 ] === true;
-		const bumpOrient = entry[ 6 ] !== undefined ? entry[ 6 ] : orient;
+		const { gx, gz, type, orient, isBump, bumpOrient, rampLength, rampAngle, rampWidth } = parseCell( entry );
 
 		// For track-ramp: render a road straight underneath + ramp mesh on top
-		const renderKey = key === 'track-ramp' ? 'track-straight' : key;
+		const renderKey = type === 'track-ramp' ? 'track-straight' : type;
 		const piece = placePiece( models, renderKey, gx, gz, orient );
 		if ( piece ) trackPieceGroup.add( piece );
 
-		if ( key === 'track-ramp' ) {
+		if ( type === 'track-ramp' ) {
 
-			const rampLength = entry[ 5 ] ?? 1.0;
-			const rampAngle  = entry[ 6 ] ?? 15;
-			const rampWidth  = entry[ 7 ] ?? 1.0;
 			const rampMesh = buildRampMesh( rampLength, rampAngle, rampWidth );
 			const deg = ORIENT_DEG[ orient ] ?? 0;
 			rampMesh.position.set( ( gx + 0.5 ) * CELL_RAW, 0.5, ( gz + 0.5 ) * CELL_RAW );
@@ -230,8 +226,9 @@ export function buildTrack( scene, models, customCells ) {
 		let minX = Infinity, maxX = - Infinity;
 		let minZ = Infinity, maxZ = - Infinity;
 
-		for ( const [ gx, gz ] of cells ) {
+		for ( const entry of cells ) {
 
+			const { gx, gz } = parseCell( entry );
 			occupied.add( gx + ',' + gz );
 			minX = Math.min( minX, gx );
 			maxX = Math.max( maxX, gx );
@@ -435,91 +432,24 @@ export function placePiece( models, key, gx, gz, orient ) {
 
 }
 
-// ─── Legacy base64url decoder (kept for ?map= URL param and old localStorage) ──
-
-const TYPE_NAMES = [ 'track-straight', 'track-corner', 'track-bump', 'track-finish', 'track-ramp' ];
-const ORIENT_TO_GODOT = [ 0, 16, 10, 22 ];
-
-export { TYPE_NAMES };
-
-export function decodeCells( str ) {
-
-	const bytes = base64urlToBytes( str );
-	const cells = [];
-	let i = 0;
-
-	while ( i + 2 < bytes.length ) {
-
-		const gx = bytes[ i ++ ] - 128;
-		const gz = bytes[ i ++ ] - 128;
-		const packed = bytes[ i ++ ];
-		const oi = packed & 0x03;
-		const ti = ( packed >> 2 ) & 0x07;  // 3 bits: supports typeIdx 0–4
-		const typeName = TYPE_NAMES[ ti ] ?? 'track-straight';
-
-		if ( typeName === 'track-ramp' ) {
-
-			// Ramp: checkpoint is at bit 5 (bit 4 used by typeIdx high bit)
-			const cp = ( packed >> 5 ) & 0x01;
-			if ( i + 1 >= bytes.length ) break;
-			const lenByte   = bytes[ i ++ ];
-			const paramByte = bytes[ i ++ ];
-			const rampLength = lenByte / 10;
-			const ap = ( paramByte >> 4 ) & 0x0f;
-			const wp = paramByte & 0x0f;
-			const rampAngle = ap * 2 + 5;
-			const rampWidth = ( wp + 1 ) / 10;
-
-			const cell = [ gx, gz, 'track-ramp', ORIENT_TO_GODOT[ oi ] ];
-			cell.push( cp ? true : false );  // [4] isCheckpoint
-			cell.push( rampLength );          // [5]
-			cell.push( rampAngle );           // [6]
-			cell.push( rampWidth );           // [7]
-			cells.push( cell );
-
-		} else {
-
-			// Standard cell: checkpoint at bit 4, bump at bit 5, bumpOrient at bits 6–7
-			const cp = ( packed >> 4 ) & 0x01;
-			const bump = ( packed >> 5 ) & 0x01;
-			const boi = ( packed >> 6 ) & 0x03;
-			const cell = [ gx, gz, typeName, ORIENT_TO_GODOT[ oi ] ];
-			if ( cp || bump ) cell.push( cp ? true : false );
-			if ( bump ) { cell.push( true ); cell.push( ORIENT_TO_GODOT[ boi ] ); }
-			cells.push( cell );
-
-		}
-
-	}
-
-	return cells;
-
-}
 
 export function computeSpawnPosition( cells ) {
 
-	let cell = cells[ 0 ];
+	let found = null;
 
-	for ( const c of cells ) {
+	for ( const entry of cells ) {
 
-		if ( c[ 2 ] === 'track-finish' ) {
-
-			cell = c;
-			break;
-
-		}
+		const c = parseCell( entry );
+		if ( c.type === 'track-finish' ) { found = c; break; }
 
 	}
 
-	if ( ! cell ) return { position: [ 3.5, 0.5, 5 ], angle: 0 };
+	if ( ! found ) found = parseCell( cells[ 0 ] );
+	if ( ! found ) return { position: [ 3.5, 0.5, 5 ], angle: 0 };
 
-	const gx = cell[ 0 ];
-	const gz = cell[ 1 ];
-	const x = ( gx + 0.5 ) * CELL_RAW * GRID_SCALE;
-	const z = ( gz + 0.5 ) * CELL_RAW * GRID_SCALE;
-
-	const orient = cell[ 3 ];
-	const angle = THREE.MathUtils.degToRad( ORIENT_DEG[ orient ] || 0 );
+	const x = ( found.gx + 0.5 ) * CELL_RAW * GRID_SCALE;
+	const z = ( found.gz + 0.5 ) * CELL_RAW * GRID_SCALE;
+	const angle = THREE.MathUtils.degToRad( ORIENT_DEG[ found.orient ] || 0 );
 
 	return { position: [ x, 0.5, z ], angle };
 
@@ -532,8 +462,9 @@ export function computeTrackBounds( cells ) {
 	let minX = Infinity, maxX = - Infinity;
 	let minZ = Infinity, maxZ = - Infinity;
 
-	for ( const [ gx, gz ] of cells ) {
+	for ( const entry of cells ) {
 
+		const { gx, gz } = parseCell( entry );
 		minX = Math.min( minX, gx );
 		maxX = Math.max( maxX, gx );
 		minZ = Math.min( minZ, gz );
@@ -551,13 +482,3 @@ export function computeTrackBounds( cells ) {
 
 }
 
-function base64urlToBytes( str ) {
-
-	const base64 = str.replace( /-/g, '+' ).replace( /_/g, '/' );
-	const binary = atob( base64 );
-	const bytes = new Uint8Array( binary.length );
-	for ( let i = 0; i < binary.length; i ++ ) bytes[ i ] = binary.charCodeAt( i );
-
-	return bytes;
-
-}

@@ -90,6 +90,13 @@ const MIGRATIONS = [
         created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
 
+    // ── 006: circuits library (name, owner, updated_at) ─────────────────────
+    `ALTER TABLE circuits ADD COLUMN IF NOT EXISTS name VARCHAR(60)`,
+    `ALTER TABLE circuits ADD COLUMN IF NOT EXISTS player_id INTEGER REFERENCES players(id) ON DELETE SET NULL`,
+    `ALTER TABLE circuits ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`,
+    `ALTER TABLE circuits ADD COLUMN IF NOT EXISTS builtin BOOLEAN NOT NULL DEFAULT FALSE`,
+    `CREATE INDEX IF NOT EXISTS idx_circuits_player ON circuits(player_id)`,
+
 ];
 
 export async function migrate() {

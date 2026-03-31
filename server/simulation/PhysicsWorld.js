@@ -7,6 +7,7 @@ import {
     CastRayStatus, filter
 } from 'crashcat';
 import { ORIENT_DEG, CELL_RAW, GRID_SCALE } from './TrackData.js';
+import { parseCell } from '../../js/CellFormat.js';
 import { CHASSIS_HALF_EXTENTS } from './VehicleStats.js';
 
 export function initPhysics( cells ) {
@@ -20,13 +21,16 @@ export function initPhysics( cells ) {
     const BPL_STATIC = addBroadphaseLayer( worldSettings );
     const OL_MOVING = addObjectLayer( worldSettings, BPL_MOVING );
     const OL_STATIC = addObjectLayer( worldSettings, BPL_STATIC );
+    const OL_WALL   = addObjectLayer( worldSettings, BPL_STATIC );
 
     enableCollision( worldSettings, OL_MOVING, OL_STATIC );
     enableCollision( worldSettings, OL_MOVING, OL_MOVING );
+    enableCollision( worldSettings, OL_MOVING, OL_WALL );
 
     const world = createWorld( worldSettings );
     world._OL_MOVING = OL_MOVING;
     world._OL_STATIC = OL_STATIC;
+    world._OL_WALL   = OL_WALL;
 
     // Build wall colliders
     buildWallColliders( world, cells );
@@ -96,6 +100,7 @@ export function initRayFilter( world ) {
 
     const f = filter.create( world.settings.layers );
     filter.disableObjectLayer( f, world.settings.layers, world._OL_MOVING );
+    filter.disableObjectLayer( f, world.settings.layers, world._OL_WALL );
     return f;
 
 }
@@ -160,23 +165,28 @@ function buildWallColliders( world, cells ) {
     const INNER_SEG = 3;
     const INNER_SEG_HALF_LEN = ( INNER_R * ( Math.PI / 2 ) / INNER_SEG / 2 ) * S;
 
-    function addArcWall( wcx, wcz, arcStart, radius, numSeg, segHalfLen ) {
+    function addArcWall( wcx, wcz, arcStart, radius, numSeg, segHalfLen, cellMinX, cellMaxX, cellMinZ, cellMaxZ, _debugLabel ) {
 
         for ( let i = 0; i < numSeg; i++ ) {
 
             const aMid = arcStart + ( ( i + 0.5 ) / numSeg ) * ARC_SPAN;
+            const px = wcx + radius * Math.cos( aMid ) * S;
+            const pz = wcz + radius * Math.sin( aMid ) * S;
+
+            // Skip segments outside cell bounds or at the arc endpoints (junction with adjacent cells)
+            const outOfBounds = px < cellMinX || px > cellMaxX || pz < cellMinZ || pz > cellMaxZ;
+            const isEndpoint = ( i === 0 || i === numSeg - 1 );
+            if ( _debugLabel ) console.log( `  [${_debugLabel}] seg${i} px=${px.toFixed(3)} pz=${pz.toFixed(3)} ${ ( outOfBounds || isEndpoint ) ? 'SKIP' : 'ADD' }` );
+            if ( outOfBounds || isEndpoint ) continue;
+
             const halfExtents = [ hThick, hHeight, segHalfLen ];
-            const position = [
-                wcx + radius * Math.cos( aMid ) * S,
-                wallY,
-                wcz + radius * Math.sin( aMid ) * S
-            ];
+            const position = [ px, wallY, pz ];
             const quaternion = [ 0, Math.sin( -aMid / 2 ), 0, Math.cos( -aMid / 2 ) ];
 
             wallBodies.add( rigidBody.create( world, {
                 shape: box.create( { halfExtents } ),
                 motionType: MotionType.STATIC,
-                objectLayer: world._OL_STATIC,
+                objectLayer: world._OL_WALL,
                 position,
                 quaternion,
                 friction: 0.0,
@@ -228,7 +238,7 @@ function buildWallColliders( world, cells ) {
             wallBodies.add( rigidBody.create( world, {
                 shape: box.create( { halfExtents: [ BUMP_HALF_W, BUMP_SLAB_H, BUMP_SURFACE_HALF ] } ),
                 motionType: MotionType.STATIC,
-                objectLayer: world._OL_STATIC,
+                objectLayer: world._OL_WALL,
                 position: [ wx, wy, wz ],
                 quaternion: [ qx2, qy2, qz2, qw2 ],
                 friction: 0.3,
@@ -272,11 +282,9 @@ function buildWallColliders( world, cells ) {
 
     for ( const entry of cells ) {
 
-        const [ gx, gz, key, orient ] = entry;
-        const isBump     = entry[ 5 ] === true;
-        const bumpOrient = entry[ 6 ] !== undefined ? entry[ 6 ] : orient;
+        const { gx, gz, type, orient, isBump, bumpOrient, rampLength, rampAngle, rampWidth } = parseCell( entry );
 
-        if ( key === 'track-bump' ) continue; // legacy guard
+        if ( type === 'track-bump' ) continue; // legacy guard
 
         const cx = ( gx + 0.5 ) * CELL_RAW * S;
         const cz = ( gz + 0.5 ) * CELL_RAW * S;
@@ -285,7 +293,7 @@ function buildWallColliders( world, cells ) {
         const rad = deg * Math.PI / 180;
         const cr = Math.cos( rad ), sr = Math.sin( rad );
 
-        if ( key === 'track-straight' || key === 'track-finish' || key === 'track-ramp' ) {
+        if ( type === 'track-straight' || type === 'track-finish' || type === 'track-ramp' ) {
 
             for ( const side of [ -1, 1 ] ) {
 
@@ -296,7 +304,7 @@ function buildWallColliders( world, cells ) {
                 wallBodies.add( rigidBody.create( world, {
                     shape: box.create( { halfExtents: [ hThick, hHeight, hLen ] } ),
                     motionType: MotionType.STATIC,
-                    objectLayer: world._OL_STATIC,
+                    objectLayer: world._OL_WALL,
                     position: [ wx, wallY, wz ],
                     quaternion: [ 0, Math.sin( rad / 2 ), 0, Math.cos( rad / 2 ) ],
                     friction: 0.0,
@@ -305,31 +313,35 @@ function buildWallColliders( world, cells ) {
 
             }
 
-        } else if ( key === 'track-corner' ) {
+        } else if ( type === 'track-corner' ) {
 
             const wcx = cx + ( ARC_CENTER_X * cr + ARC_CENTER_Z * sr ) * S;
             const wcz = cz + ( -ARC_CENTER_X * sr + ARC_CENTER_Z * cr ) * S;
             const arcStart = -rad;
+            const cellMinX = gx * CELL_RAW * S;
+            const cellMaxX = ( gx + 1 ) * CELL_RAW * S;
+            const cellMinZ = gz * CELL_RAW * S;
+            const cellMaxZ = ( gz + 1 ) * CELL_RAW * S;
 
-            addArcWall( wcx, wcz, arcStart, OUTER_R, OUTER_SEG, OUTER_SEG_HALF_LEN );
-            addArcWall( wcx, wcz, arcStart, INNER_R, INNER_SEG, INNER_SEG_HALF_LEN );
+            const _debugCorner = ( gx === 4 && ( gz === -2 || gz === -1 ) );
+            if ( _debugCorner ) console.log( `[ArcWall] corner gx=${ gx } gz=${ gz } orient=${ orient } wcx=${ wcx.toFixed(3) } wcz=${ wcz.toFixed(3) } arcStart=${ ( arcStart * 180 / Math.PI ).toFixed(1) }° bounds=[${cellMinX.toFixed(2)},${cellMaxX.toFixed(2)}]x[${cellMinZ.toFixed(2)},${cellMaxZ.toFixed(2)}]` );
+
+            const _dl = _debugCorner ? `gx${gx}gz${gz}` : null;
+            addArcWall( wcx, wcz, arcStart, OUTER_R, OUTER_SEG, OUTER_SEG_HALF_LEN, cellMinX, cellMaxX, cellMinZ, cellMaxZ, _dl ? _dl + '_OUTER' : null );
 
         }
 
-        if ( key === 'track-ramp' ) {
+        if ( type === 'track-ramp' ) {
 
-            const rampLength = entry[ 5 ] ?? 1.0;
-            const rampAngle  = entry[ 6 ] ?? 15;
-            const rampWidth  = entry[ 7 ] ?? 1.0;
-            const rampDeg = ORIENT_DEG[ orient ] ?? 0;
-            const rampRad = rampDeg * Math.PI / 180;
+            console.log( `[Physics] RAMP collider at gx=${ gx } gz=${ gz }` );
+            const rampRad = ( ORIENT_DEG[ orient ] ?? 0 ) * Math.PI / 180;
             addRampCollider( cx, cz, rampRad, rampLength, rampAngle, rampWidth );
 
         } else if ( isBump ) {
 
-            const bumpDeg = ORIENT_DEG[ bumpOrient ] ?? 0;
-            const bumpRad2 = bumpDeg * Math.PI / 180;
-            addBumpCollider( cx, cz, bumpRad2 );
+            console.log( `[Physics] BUMP collider at gx=${ gx } gz=${ gz }` );
+            const bumpRad = ( ORIENT_DEG[ bumpOrient ] ?? 0 ) * Math.PI / 180;
+            addBumpCollider( cx, cz, bumpRad );
 
         }
 
@@ -347,8 +359,9 @@ function computeBounds( cells ) {
     let minX = Infinity, maxX = -Infinity;
     let minZ = Infinity, maxZ = -Infinity;
 
-    for ( const [ gx, gz ] of cells ) {
+    for ( const entry of cells ) {
 
+        const { gx, gz } = parseCell( entry );
         minX = Math.min( minX, gx );
         maxX = Math.max( maxX, gx );
         minZ = Math.min( minZ, gz );

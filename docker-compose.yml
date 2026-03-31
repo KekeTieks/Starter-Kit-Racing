@@ -24,6 +24,7 @@ services:
     working_dir: /app/server
     volumes:
       - ./server:/app/server
+      - ./js:/app/js
       - server_node_modules:/app/server/node_modules
     ports:
       - "2567:2567"

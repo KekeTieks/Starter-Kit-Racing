@@ -12,7 +12,7 @@ A JavaScript/Three.js racing game ported from [Kenney's Starter Kit Racing](http
 npm install
 npm run dev
 ```
-Open `index.html` to play, `editor.html` for the track editor. Custom tracks are passed via `?map=<base64url>` query param.
+Open `index.html` to play, `editor.html` for the track editor. Custom tracks are passed via `?circuit=<ID>` query param (fetched from PostgreSQL).
 
 There are no tests, linter, or build commands.
 
@@ -24,7 +24,7 @@ There are no tests, linter, or build commands.
 - Straight/finish: two parallel box colliders per cell
 - Corner: arc of box segments for outer wall + inner wall, centered at `(-CELL_HALF, +CELL_HALF)` in local cell space
 
-**Track system** (`Track.js`): Grid-based layout where each cell is `[gx, gz, pieceType, godotOrient]`. Cell size is `CELL_RAW=9.99`, scaled by `GRID_SCALE=0.75`. Orientation uses Godot GridMap indices `{0: 0°, 10: 180°, 16: 90°, 22: 270°}`. Track data is encoded/decoded as base64url (3 bytes per cell) for URL sharing.
+**Track system** (`Track.js`): Grid-based layout where each cell is `[gx, gz, pieceType, godotOrient]`. Cell size is `CELL_RAW=9.99`, scaled by `GRID_SCALE=0.75`. Orientation uses Godot GridMap indices `{0: 0°, 10: 180°, 16: 90°, 22: 270°}`. Circuits are stored in PostgreSQL (`circuits` table with JSONB cells) and managed via REST API (`/api/circuits`). The circuit library (`CircuitLibrary.js`) is fully server-backed — no localStorage.
 
 **Vehicle** (`Vehicle.js`): Two input modes — keyboard/gamepad (standard steering + throttle) and touch (joystick defines world-space direction with auto-gas). Visual model tilts body and spins wheels based on acceleration/steering. Falls below y=-10 trigger a position reset.
 

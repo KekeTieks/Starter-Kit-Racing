@@ -900,9 +900,36 @@ export class Lobby {
 
 	// ─── Screen 3 : Circuit selection (offline only) ─────────────────────────
 
-	_buildCircuitScreen() {
+	async _buildCircuitScreen() {
 
-		const circuits = loadCircuits();
+		this.container.innerHTML = `
+			<div class="lobby-panel">
+				<div class="lobby-header-row">
+					<button id="btn-back" class="back-btn">← Retour</button>
+					<h1>Choisir un circuit</h1>
+				</div>
+				<div class="circuit-grid"><div class="lobby-status">Chargement…</div></div>
+				<div id="circuit-status" class="lobby-status"></div>
+				<div id="circuit-actions" style="display:none">
+					<button id="btn-confirm" class="primary-btn">Jouer hors-ligne</button>
+				</div>
+			</div>`;
+
+		document.getElementById( 'btn-back' ).addEventListener( 'click', () => this._transition( () => this._buildModeScreen(), 'back' ) );
+
+		let circuits;
+
+		try {
+
+			circuits = await loadCircuits();
+
+		} catch {
+
+			this.container.querySelector( '.circuit-grid' ).innerHTML =
+				'<div class="lobby-status">Erreur de chargement</div>';
+			return;
+
+		}
 
 		const cards = circuits.map( ( circuit ) => {
 
@@ -914,25 +941,12 @@ export class Lobby {
 				<div class="circuit-card" data-id="${ circuit.id }">
 					${ deleteBtnHtml }
 					<div class="circuit-minimap">${ minimap }</div>
-					<div class="circuit-name">${ escHtml( circuit.name ) }</div>
+					<div class="circuit-name">${ escHtml( circuit.name || 'Sans nom' ) }</div>
 				</div>`;
 
 		} ).join( '' );
 
-		const btnLabel = 'Jouer hors-ligne';
-
-		this.container.innerHTML = `
-			<div class="lobby-panel">
-				<div class="lobby-header-row">
-					<button id="btn-back" class="back-btn">← Retour</button>
-					<h1>Choisir un circuit</h1>
-				</div>
-				<div class="circuit-grid">${ cards }</div>
-				<div id="circuit-status" class="lobby-status"></div>
-				<div id="circuit-actions" style="display:none">
-					<button id="btn-confirm" class="primary-btn">${ btnLabel }</button>
-				</div>
-			</div>`;
+		this.container.querySelector( '.circuit-grid' ).innerHTML = cards;
 
 		if ( circuits.length > 0 ) {
 
@@ -955,13 +969,18 @@ export class Lobby {
 
 		this.container.querySelectorAll( '.circuit-delete-btn' ).forEach( ( btn ) => {
 
-			btn.addEventListener( 'click', ( e ) => {
+			btn.addEventListener( 'click', async ( e ) => {
 
 				e.stopPropagation();
 				const id = btn.dataset.id;
 				if ( confirm( 'Supprimer ce circuit ?' ) ) {
 
-					deleteCircuit( id );
+					try {
+
+						await deleteCircuit( id );
+
+					} catch { /* toast? */ }
+
 					this._buildCircuitScreen();
 
 				}
@@ -969,8 +988,6 @@ export class Lobby {
 			} );
 
 		} );
-
-		document.getElementById( 'btn-back' ).addEventListener( 'click', () => this._transition( () => this._buildModeScreen(), 'back' ) );
 
 		document.getElementById( 'btn-confirm' ).addEventListener( 'click', () => {
 
@@ -1234,22 +1251,7 @@ export class Lobby {
 
 	// ─── Circuit overlay (host, inside room lobby) ────────────────────────────
 
-	_showCircuitOverlay() {
-
-		const circuits = loadCircuits();
-
-		const cards = circuits.map( ( circuit ) => {
-
-			const minimap = generateMinimap( circuit.cells, 64 );
-			const active = circuit.name === this._selectedCircuitName ? ' active' : '';
-
-			return `
-				<div class="circuit-card${ active }" data-id="${ circuit.id }">
-					<div class="circuit-minimap">${ minimap }</div>
-					<div class="circuit-name">${ escHtml( circuit.name ) }</div>
-				</div>`;
-
-		} ).join( '' );
+	async _showCircuitOverlay() {
 
 		const overlay = document.createElement( 'div' );
 		overlay.className = 'circuit-overlay';
@@ -1259,10 +1261,45 @@ export class Lobby {
 					<button id="btn-overlay-back" class="back-btn">← Retour</button>
 					<h1 style="font-size:24px;margin:0">Changer de circuit</h1>
 				</div>
-				<div class="circuit-grid">${ cards }</div>
+				<div class="circuit-grid"><div class="lobby-status">Chargement…</div></div>
 			</div>`;
 
 		this.container.appendChild( overlay );
+
+		document.getElementById( 'btn-overlay-back' ).addEventListener( 'click', () => {
+
+			overlay.remove();
+
+		} );
+
+		let circuits;
+
+		try {
+
+			circuits = await loadCircuits();
+
+		} catch {
+
+			overlay.querySelector( '.circuit-grid' ).innerHTML =
+				'<div class="lobby-status">Erreur de chargement</div>';
+			return;
+
+		}
+
+		const cards = circuits.map( ( circuit ) => {
+
+			const minimap = generateMinimap( circuit.cells, 64 );
+			const active = circuit.name === this._selectedCircuitName ? ' active' : '';
+
+			return `
+				<div class="circuit-card${ active }" data-id="${ circuit.id }">
+					<div class="circuit-minimap">${ minimap }</div>
+					<div class="circuit-name">${ escHtml( circuit.name || 'Sans nom' ) }</div>
+				</div>`;
+
+		} ).join( '' );
+
+		overlay.querySelector( '.circuit-grid' ).innerHTML = cards;
 
 		overlay.querySelectorAll( '.circuit-card' ).forEach( ( card ) => {
 
@@ -1279,12 +1316,6 @@ export class Lobby {
 				if ( this.onCircuitChange ) this.onCircuitChange( circuit.cells );
 
 			} );
-
-		} );
-
-		document.getElementById( 'btn-overlay-back' ).addEventListener( 'click', () => {
-
-			overlay.remove();
 
 		} );
 

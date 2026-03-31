@@ -6,7 +6,7 @@ import { Vehicle } from './Vehicle.js';
 import { RemoteVehicle } from './RemoteVehicle.js';
 import { Camera } from './Camera.js';
 import { Controls } from './Controls.js';
-import { buildTrack, decodeCells, computeSpawnPosition, computeTrackBounds } from './Track.js';
+import { buildTrack, computeSpawnPosition, computeTrackBounds } from './Track.js';
 import { buildWallColliders, createSphereBody, createChassisBody, createKinematicSphereBody, initRayFilter } from './Physics.js';
 import { SmokeTrails, NitroFX } from './Particles.js';
 import { Skidmarks } from './Skidmarks.js';
@@ -166,15 +166,20 @@ function initSinglePlayer( customCells, spawn, vehicleKey ) {
 	const BPL_STATIC = addBroadphaseLayer( worldSettings );
 	const OL_MOVING = addObjectLayer( worldSettings, BPL_MOVING );
 	const OL_STATIC = addObjectLayer( worldSettings, BPL_STATIC );
+	const OL_WALL   = addObjectLayer( worldSettings, BPL_STATIC );
 
 	enableCollision( worldSettings, OL_MOVING, OL_STATIC );
 	enableCollision( worldSettings, OL_MOVING, OL_MOVING );
+	enableCollision( worldSettings, OL_MOVING, OL_WALL );
 
 	const world = createWorld( worldSettings );
 	world._OL_MOVING = OL_MOVING;
 	world._OL_STATIC = OL_STATIC;
+	world._OL_WALL   = OL_WALL;
 
-	buildWallColliders( world, null, customCells );
+	const debugGroup = new THREE.Group();
+	scene.add( debugGroup );
+	buildWallColliders( world, debugGroup, customCells );
 
 	const roadHalf = groundSize / 2;
 	rigidBody.create( world, {
@@ -414,13 +419,16 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 	const BPL_STATIC = addBroadphaseLayer( localWorldSettings );
 	const OL_MOVING = addObjectLayer( localWorldSettings, BPL_MOVING );
 	const OL_STATIC = addObjectLayer( localWorldSettings, BPL_STATIC );
+	const OL_WALL   = addObjectLayer( localWorldSettings, BPL_STATIC );
 
 	enableCollision( localWorldSettings, OL_MOVING, OL_STATIC );
 	enableCollision( localWorldSettings, OL_MOVING, OL_MOVING );
+	enableCollision( localWorldSettings, OL_MOVING, OL_WALL );
 
 	const localWorld = createWorld( localWorldSettings );
 	localWorld._OL_MOVING = OL_MOVING;
 	localWorld._OL_STATIC = OL_STATIC;
+	localWorld._OL_WALL   = OL_WALL;
 	localWorld._isServerWorld = true; // suppress client-side LINEAR_DAMP (server applies it)
 
 	buildWallColliders( localWorld, null, customCells );
@@ -965,11 +973,9 @@ async function init() {
 	await loadModels();
 
 	const params = new URLSearchParams( window.location.search );
-	const mapParam     = params.get( 'map' );
 	const circuitParam = params.get( 'circuit' );
 	const roomParam    = params.get( 'room' );
 
-	// URL ?map= fallback (from editor share link, legacy base64)
 	// URL ?circuit= — fetch cells from server by short ID
 	let urlCells = null;
 
@@ -992,18 +998,6 @@ async function init() {
 		} catch ( e ) {
 
 			console.warn( 'Failed to fetch circuit:', e );
-
-		}
-
-	} else if ( mapParam ) {
-
-		try {
-
-			urlCells = decodeCells( mapParam );
-
-		} catch ( e ) {
-
-			console.warn( 'Invalid map parameter, using lobby selection' );
 
 		}
 

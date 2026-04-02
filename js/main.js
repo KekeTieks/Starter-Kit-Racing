@@ -6,20 +6,22 @@ import { Vehicle } from './Vehicle.js';
 import { RemoteVehicle } from './RemoteVehicle.js';
 import { Camera } from './Camera.js';
 import { Controls } from './Controls.js';
-import { buildTrack, computeSpawnPosition, computeTrackBounds } from './Track.js';
-import { buildWallColliders, createSphereBody, createChassisBody, createKinematicSphereBody, initRayFilter } from './Physics.js';
+import { buildTrack, computeSpawnPosition, computeTrackBounds, tunnelCutoutUniforms } from './Track.js';
+import { buildWallColliders, createChassisBody, initRayFilter } from './Physics.js';
 import { SmokeTrails, NitroFX } from './Particles.js';
 import { Skidmarks } from './Skidmarks.js';
 import { GameAudio } from './Audio.js';
 import { Network } from './Network.js';
 import { Lobby } from './Lobby.js';
 import { RaceHUD } from './RaceHUD.js';
-import { VEHICLE_STATS, USE_ARCADE_VEHICLE } from './VehicleStats.js';
+import { VEHICLE_STATS } from '../shared/VehicleStats.js';
 import { upgradeService } from './UpgradeService.js';
 import { profileService } from './ProfileService.js';
 import { WeatherController } from './Weather.js';
 import { cosmeticService, CosmeticService } from './CosmeticService.js';
 import { GamepadRumble } from './GamepadRumble.js';
+import { InputBuffer } from '../shared/InputBuffer.js';
+import { keyBindings } from './KeyBindings.js';
 
 
 const renderer = new THREE.WebGLRenderer( { antialias: true, outputBufferType: THREE.HalfFloatType } );
@@ -77,7 +79,14 @@ const COLOR_TO_MODEL = {
 
 const models = {};
 
+const loadingBarEl  = document.getElementById( 'loading-bar-fill' );
+const loadingLabelEl = document.getElementById( 'loading-label' );
+const loadingScreen  = document.getElementById( 'loading-screen' );
+
 async function loadModels() {
+
+	let loaded = 0;
+	const total = modelNames.length;
 
 	const promises = modelNames.map( ( name ) =>
 		new Promise( ( resolve, reject ) => {
@@ -102,6 +111,12 @@ async function loadModels() {
 				}
 
 				models[ name ] = gltf.scene;
+
+				loaded ++;
+				const pct = Math.round( ( loaded / total ) * 100 );
+				loadingBarEl.style.width = pct + '%';
+				loadingLabelEl.textContent = `Loading assets... ${ loaded }/${ total }`;
+
 				resolve();
 
 			}, undefined, reject );
@@ -110,6 +125,21 @@ async function loadModels() {
 	);
 
 	await Promise.all( promises );
+
+	// Fade out loading screen
+	loadingScreen.classList.add( 'fade-out' );
+	setTimeout( () => loadingScreen.remove(), 400 );
+
+}
+
+// ─── Tunnel ceiling occlusion ────────────────────────────
+// Update the shared cutout uniform so tunnel materials fade
+// in a circle around the vehicle. vehicleWorldX/Z are in
+// world space (already scaled by GRID_SCALE).
+
+function updateTunnelOcclusion( _tunnelCeilings, vehicleWorldX, vehicleWorldZ ) {
+
+	tunnelCutoutUniforms.uVehiclePos.value.set( vehicleWorldX, 0, vehicleWorldZ );
 
 }
 
@@ -134,19 +164,19 @@ function setupScene( customCells ) {
 	scene.fog.near = baseFogNear;
 	scene.fog.far  = baseFogFar;
 
-	const trackObjects = buildTrack( scene, models, customCells );
+	const { sceneObjects: trackObjects, tunnelCeilings } = buildTrack( scene, models, customCells );
 
-	return { bounds, trackObjects, baseFogNear, baseFogFar };
+	return { bounds, trackObjects, tunnelCeilings, baseFogNear, baseFogFar };
 
 }
 
 // ─── Single-player ────────────────────────────────────────
 
-function initSinglePlayer( customCells, spawn, vehicleKey ) {
+function initSinglePlayer( customCells, spawn, vehicleKey, lobby ) {
 
 	renderer.domElement.classList.remove( 'hidden' );
 
-	const { bounds, baseFogNear, baseFogFar } = setupScene( customCells );
+	const { bounds, trackObjects: spTrackObjects, tunnelCeilings: spTunnelCeilings, baseFogNear, baseFogFar } = setupScene( customCells );
 	const groundSize = Math.max( bounds.halfWidth, bounds.halfDepth ) * 2 + 20;
 
 	const _spWeathers = [ 'clear', 'clear', 'clear', 'rain', 'fog', 'storm' ];
@@ -195,9 +225,7 @@ function initSinglePlayer( customCells, spawn, vehicleKey ) {
 	const vStats = JSON.parse( JSON.stringify( VEHICLE_STATS[ vKey ] || VEHICLE_STATS.yellow ) );
 	upgradeService.applyDeltasToStats( vStats, vKey );
 
-	const sphereBody = USE_ARCADE_VEHICLE
-		? createChassisBody( world, spawn ? spawn.position : null, vStats )
-		: createSphereBody( world, spawn ? spawn.position : null );
+	const sphereBody = createChassisBody( world, spawn ? spawn.position : null, vStats );
 
 	const vehicle = new Vehicle( vStats );
 	vehicle.rigidBody = sphereBody;
@@ -205,11 +233,7 @@ function initSinglePlayer( customCells, spawn, vehicleKey ) {
 	vehicle._spawnPos = spawn ? [ ...spawn.position ] : [ 3.5, 0.5, 5 ];
 	vehicle._spawnAngle = spawn ? ( spawn.angle || 0 ) : 0;
 
-	if ( USE_ARCADE_VEHICLE ) {
-
-		vehicle._rayFilter = initRayFilter( world );
-
-	}
+	vehicle._rayFilter = initRayFilter( world );
 
 	if ( spawn ) {
 
@@ -244,10 +268,10 @@ function initSinglePlayer( customCells, spawn, vehicleKey ) {
 
 	const hud = new RaceHUD();
 
-	// Touche L : toggle manuel des phares
+	// Touche configurable : toggle manuel des phares
 	const _spHeadlightHandler = ( e ) => {
 
-		if ( e.code === 'KeyL' ) vehicle.setHeadlights( ! vehicle.headlightsOn );
+		if ( keyBindings.isAction( 'headlights', e.code ) ) vehicle.setHeadlights( ! vehicle.headlightsOn );
 
 	};
 	window.addEventListener( 'keydown', _spHeadlightHandler );
@@ -318,8 +342,64 @@ function initSinglePlayer( customCells, spawn, vehicleKey ) {
 	const timer = new THREE.Timer();
 	timer.update(); // consume the initial delta so first frame starts at dt≈0
 
+	let spPaused = false;
+	let spRunning = true;
+
+	function resumeSP() {
+
+		if ( ! spPaused ) return;
+		spPaused = false;
+		hud.hidePause();
+		timer.update(); // consume accumulated delta
+		animate();
+
+	}
+
+	function quitSP() {
+
+		spRunning = false;
+		spPaused = false;
+		hud.hideAll();
+
+		// Cleanup scene
+		window.removeEventListener( 'keydown', _spHeadlightHandler );
+		window.removeEventListener( 'keydown', _spPauseHandler );
+		controls.dispose();
+		cam.dispose();
+		weather.dispose();
+		particles.dispose( scene );
+		nitroFX.dispose( scene );
+		skidmarks.dispose( scene );
+		for ( const obj of spTrackObjects ) scene.remove( obj );
+		if ( vehicle.container.parent ) scene.remove( vehicle.container );
+		dirLight.target = dirLight;
+		scene.background = new THREE.Color( 0xadb2ba );
+		renderer.domElement.classList.add( 'hidden' );
+		lobby.show();
+
+	}
+
+	const _spPauseHandler = ( e ) => {
+
+		if ( e.code !== 'Escape' || ! spRunning ) return;
+
+		if ( spPaused ) {
+
+			resumeSP();
+
+		} else {
+
+			spPaused = true;
+			hud.showPause( resumeSP, quitSP );
+
+		}
+
+	};
+	window.addEventListener( 'keydown', _spPauseHandler );
+
 	function animate() {
 
+		if ( ! spRunning || spPaused ) return;
 		requestAnimationFrame( animate );
 
 		timer.update();
@@ -330,6 +410,8 @@ function initSinglePlayer( customCells, spawn, vehicleKey ) {
 		updateWorld( world, contactListener, dt );
 
 		vehicle.update( dt, input );
+
+		updateTunnelOcclusion( spTunnelCeilings, vehicle.spherePos.x, vehicle.spherePos.z );
 
 		dirLight.position.set(
 			vehicle.spherePos.x + 11.4,
@@ -368,7 +450,7 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 
 	renderer.domElement.classList.remove( 'hidden' );
 
-	const { bounds, trackObjects, baseFogNear, baseFogFar } = setupScene( customCells );
+	const { bounds, trackObjects, tunnelCeilings: mpTunnelCeilings, baseFogNear, baseFogFar } = setupScene( customCells );
 
 	const weather = new WeatherController( {
 		scene, fog: scene.fog, dirLight, hemiLight, bloomPass,
@@ -429,7 +511,6 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 	localWorld._OL_MOVING = OL_MOVING;
 	localWorld._OL_STATIC = OL_STATIC;
 	localWorld._OL_WALL   = OL_WALL;
-	localWorld._isServerWorld = true; // suppress client-side LINEAR_DAMP (server applies it)
 
 	buildWallColliders( localWorld, null, customCells );
 
@@ -447,6 +528,7 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 	let localSphereBody = null;
 	let localVehicleReady = false;
 	let running = true;
+	const inputBuffer = new InputBuffer();
 
 	const localWallBodies = localWorld._wallBodies || new Set();
 
@@ -499,7 +581,6 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 				const impactVelocity = Math.sqrt( vel[ 0 ] * vel[ 0 ] + vel[ 2 ] * vel[ 2 ] );
 				audio.playImpact( impactVelocity );
 				rumble.collision( impactVelocity / 15 );
-				vehicle._postContactFrames = 4;
 
 			} else {
 
@@ -547,18 +628,11 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 			const spawnPos = myState ? [ myState.sx, myState.sy, myState.sz ] : null;
 
 			// Create local physics body for prediction
-			localSphereBody = USE_ARCADE_VEHICLE
-				? createChassisBody( localWorld, spawnPos, vStats )
-				: createSphereBody( localWorld, spawnPos );
+			localSphereBody = createChassisBody( localWorld, spawnPos, vStats );
 			vehicle.rigidBody = localSphereBody;
 			vehicle.physicsWorld = localWorld;
 			vehicle.isMultiplayer = true;
-
-			if ( USE_ARCADE_VEHICLE ) {
-
-				vehicle._rayFilter = initRayFilter( localWorld );
-
-			}
+			vehicle._rayFilter = initRayFilter( localWorld );
 
 			if ( myState ) {
 
@@ -597,10 +671,16 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 			remoteVehicles.set( sessionId, remote );
 			remoteParticles.set( sessionId, new SmokeTrails( scene ) );
 
-			// Add a kinematic proxy body so the local player physically collides with remote players
+			// Add a dynamic chassis proxy so the local player physically collides with remote players.
+			// Same mass/friction as real chassis for correct collision impulses.
+			// gravityFactor=0 because position is driven via velocity each frame —
+			// gravity would pull the proxy down and create phantom forces at ramp exits.
 			const state = network.getPlayerState( sessionId );
 			const spawnPos = state ? [ state.sx, state.sy, state.sz ] : null;
-			const proxyBody = createKinematicSphereBody( localWorld, spawnPos );
+			const proxyBody = createChassisBody( localWorld, spawnPos, {
+				...vStats,
+				gravityFactor: 0,
+			} );
 			remoteProxyBodies.set( sessionId, proxyBody );
 
 		}
@@ -639,7 +719,13 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 
 		}
 
-		remoteProxyBodies.delete( sessionId );
+		const proxy = remoteProxyBodies.get( sessionId );
+		if ( proxy ) {
+
+			rigidBody.remove( localWorld, proxy );
+			remoteProxyBodies.delete( sessionId );
+
+		}
 
 		updateLobbyPlayers( network, lobby );
 
@@ -707,13 +793,52 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 	vehicle.weatherType = _initialWeather;
 	_syncHeadlights( _initialWeather === 'night' );
 
-	// Touche L : toggle manuel des phares
+	// Touche configurable : toggle manuel des phares
 	const _mpHeadlightHandler = ( e ) => {
 
-		if ( e.code === 'KeyL' ) vehicle.setHeadlights( ! vehicle.headlightsOn );
+		if ( keyBindings.isAction( 'headlights', e.code ) ) vehicle.setHeadlights( ! vehicle.headlightsOn );
 
 	};
 	window.addEventListener( 'keydown', _mpHeadlightHandler );
+
+	// ── Pause menu (multiplayer) ─────────────────────────
+	let mpPaused = false;
+
+	function resumeMP() {
+
+		mpPaused = false;
+		hud.hidePause();
+
+	}
+
+	function quitMP() {
+
+		mpPaused = false;
+		cleanupMultiplayer();
+		window.removeEventListener( 'keydown', _mpPauseHandler );
+		hud.hideAll();
+		network.disconnect();
+		lobby.show();
+
+	}
+
+	const _mpPauseHandler = ( e ) => {
+
+		if ( e.code !== 'Escape' || ! running ) return;
+
+		if ( mpPaused ) {
+
+			resumeMP();
+
+		} else {
+
+			mpPaused = true;
+			hud.showPause( resumeMP, quitMP );
+
+		}
+
+	};
+	window.addEventListener( 'keydown', _mpPauseHandler );
 
 	// Apply rewards when the server confirms them
 	network.onRaceReward = ( data ) => {
@@ -774,6 +899,12 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 		}
 
 		remoteVehicles.clear();
+		for ( const proxy of remoteProxyBodies.values() ) {
+
+			rigidBody.remove( localWorld, proxy );
+
+		}
+
 		remoteProxyBodies.clear();
 
 		for ( const rp of remoteParticles.values() ) {
@@ -802,8 +933,9 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 		// Restore day sky (in case night mode was active)
 		scene.background = new THREE.Color( 0xadb2ba );
 
-		// Cleanup headlight key listener
+		// Cleanup headlight + pause key listeners
 		window.removeEventListener( 'keydown', _mpHeadlightHandler );
+		window.removeEventListener( 'keydown', _mpPauseHandler );
 
 		// Dispose controls, camera and weather listeners
 		controls.dispose();
@@ -847,7 +979,8 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 		const dt = Math.min( timer.getDelta(), 1 / 30 );
 
 		const input = controls.update();
-		network.sendInput( input );
+		const seq = network.sendInput( input );
+		if ( seq ) inputBuffer.push( seq, input.x, input.z, !! input.touchActive, !! input.handbrake, !! input.nitro, dt );
 
 		if ( localVehicleReady ) {
 
@@ -873,29 +1006,48 @@ function initMultiplayer( network, lobby, customCells, initialPhase, initialCoun
 
 			} else {
 
-				// Reconcile toward server authority BEFORE stepping local physics,
-				// so the prediction starts from the corrected state rather than
-				// accumulating a 1-frame lag that causes visible desync.
-				if ( myState ) {
-
-					vehicle.reconcileFromServer( myState );
-
-				}
-
-				// Sync proxy bodies to latest server positions BEFORE physics step
-				// so collisions are resolved against up-to-date positions, not stale ones.
+				// Steer proxy bodies toward server positions via velocity, not teleport.
+				// This lets the collision solver produce proper contact impulses.
 				for ( const [ sid, proxy ] of remoteProxyBodies ) {
 
 					const ps = network.getPlayerState( sid );
-					if ( ps ) rigidBody.setPosition( localWorld, proxy, [ ps.sx, ps.sy, ps.sz ], true );
+					if ( ! ps ) continue;
+					const pp = proxy.position;
+					const invDt = dt > 0 ? 1 / dt : 0;
+					// Drive position via velocity (smooth, solver-friendly)
+					rigidBody.setLinearVelocity( localWorld, proxy, [
+						( ps.sx - pp[ 0 ] ) * invDt,
+						( ps.sy - pp[ 1 ] ) * invDt,
+						( ps.sz - pp[ 2 ] ) * invDt,
+					] );
+					// Match server orientation + angular velocity
+					rigidBody.setQuaternion( localWorld, proxy,
+						[ ps.sqx, ps.sqy, ps.sqz, ps.sqw ], false );
+					if ( ps.savx !== undefined ) {
+
+						rigidBody.setAngularVelocity( localWorld, proxy,
+							[ ps.savx, ps.savy, ps.savz ] );
+
+					}
 
 				}
 
-				// Client-side prediction: run local physics for instant feedback
+				// Client-side prediction: run local physics for instant feedback.
 				updateWorld( localWorld, localContactListener, dt );
 				vehicle.update( dt, input );
 
+				// Reconcile: hard snap only for teleport-level desyncs.
+				// Normal driving needs no correction — client and server run
+				// identical physics (shared ArcadeVehicle).
+				if ( myState ) {
+
+					vehicle.reconcileFromServer( myState, inputBuffer );
+
+				}
+
 			}
+
+			updateTunnelOcclusion( mpTunnelCeilings, vehicle.spherePos.x, vehicle.spherePos.z );
 
 			dirLight.position.set(
 				vehicle.spherePos.x + 11.4,
@@ -1243,7 +1395,7 @@ async function init() {
 		const cells = getActiveCells();
 		const spawn = cells ? computeSpawnPosition( cells ) : null;
 		lobby.hide();
-		initSinglePlayer( cells, spawn, lobby.getVehicle() );
+		initSinglePlayer( cells, spawn, lobby.getVehicle(), lobby );
 
 	};
 

@@ -1,9 +1,9 @@
 import { Room } from 'colyseus';
 import { updateWorld, rigidBody, ContactValidateResult } from 'crashcat';
 import { RaceState, PlayerState } from '../schema/RaceState.js';
-import { initPhysics, createSphereBody, createChassisBody, initRayFilter } from '../simulation/PhysicsWorld.js';
+import { initPhysics, createChassisBody, initRayFilter } from '../simulation/PhysicsWorld.js';
 import { VehicleSim } from '../simulation/VehicleSim.js';
-import { VEHICLE_STATS, USE_ARCADE_VEHICLE } from '../simulation/VehicleStats.js';
+import { VEHICLE_STATS } from '../../shared/VehicleStats.js';
 import {
     DEFAULT_CELLS,
     computeSpawnPositions, computeSpawnPosition,
@@ -88,7 +88,7 @@ export class RaceRoom extends Room {
         const bumpy = this.trackCells.filter( c => c.isBump === true || ( Array.isArray(c) && c[5] === true ) );
         if ( bumpy.length ) console.log( `[RaceRoom] WARNING: ${ bumpy.length } bump cells detected` );
         this.world = initPhysics( this.trackCells );
-        this._rayFilter = USE_ARCADE_VEHICLE ? initRayFilter( this.world ) : null;
+        this._rayFilter = initRayFilter( this.world );
         this.sims = new Map();
         this.colorIndex = 0;
         this.hostSessionId = null;
@@ -229,6 +229,7 @@ export class RaceRoom extends Room {
                 touchActive: !! data.touchActive,
                 handbrake: !! data.handbrake,
                 nitro: !! data.nitro,
+                seq: data.seq || 0,
             } );
 
         } );
@@ -294,7 +295,7 @@ export class RaceRoom extends Room {
             const setMapBumpy = this.trackCells.filter( c => c.isBump === true || ( Array.isArray( c ) && c[ 5 ] === true ) );
             if ( setMapBumpy.length ) console.log( `[RaceRoom setMap] WARNING: ${ setMapBumpy.length } bump cells detected` );
             this.world = initPhysics( this.trackCells );
-            this._rayFilter = USE_ARCADE_VEHICLE ? initRayFilter( this.world ) : null;
+            this._rayFilter = initRayFilter( this.world );
             this.finishLine = computeFinishLine( this.trackCells );
             this.checkpoints = computeCheckpoints( this.trackCells );
 
@@ -306,10 +307,9 @@ export class RaceRoom extends Room {
                 const spawn = spawnPoints[ i++ ];
                 const simStats = this.playerStats.get( sessionId )
                     || VEHICLE_STATS[ this.state.players.get( sessionId )?.vehicle || 'yellow' ];
-                sim.body = USE_ARCADE_VEHICLE
-                    ? createChassisBody( this.world, spawn.position, simStats )
-                    : createSphereBody( this.world, spawn.position );
-                if ( this._rayFilter ) sim._rayFilter = this._rayFilter;
+                sim.world = this.world;
+                sim.body = createChassisBody( this.world, spawn.position, simStats );
+                sim._rayFilter = this._rayFilter;
                 sim.spawnPos = [ ...spawn.position ];
                 sim.spawnAngle = spawn.angle;
                 sim.spherePos[ 0 ] = spawn.position[ 0 ];
@@ -419,10 +419,8 @@ export class RaceRoom extends Room {
         const spawn = spawnPoints[ spawnPoints.length - 1 ];
 
         const sim = new VehicleSim( this.world, spawn.position, spawn.angle, stats );
-        sim.body = USE_ARCADE_VEHICLE
-            ? createChassisBody( this.world, spawn.position, stats )
-            : createSphereBody( this.world, spawn.position );
-        if ( this._rayFilter ) sim._rayFilter = this._rayFilter;
+        sim.body = createChassisBody( this.world, spawn.position, stats );
+        sim._rayFilter = this._rayFilter;
         sim.spawnPos = [ ...spawn.position ];
         sim.spawnAngle = spawn.angle;
         sim.weatherType = this.state.weather;
@@ -625,8 +623,18 @@ export class RaceRoom extends Room {
             player.qy = sim.quat[ 1 ];
             player.qz = sim.quat[ 2 ];
             player.qw = sim.quat[ 3 ];
-            const lv = sim.body ? sim.body.motionProperties.linearVelocity : null;
-            if ( lv ) { player.vx = lv[ 0 ]; player.vy = lv[ 1 ]; player.vz = lv[ 2 ]; }
+            if ( sim.body ) {
+
+                const lv = sim.body.motionProperties.linearVelocity;
+                player.vx = lv[ 0 ]; player.vy = lv[ 1 ]; player.vz = lv[ 2 ];
+                const av = sim.body.motionProperties.angularVelocity;
+                player.avx = av[ 0 ]; player.avy = av[ 1 ]; player.avz = av[ 2 ];
+
+            }
+
+            player.lastInputSeq = sim.lastInputSeq;
+            player.stateTs = Date.now();
+            player.airborne = sim.airborne === true;
             player.linearSpeed = sim.linearSpeed;
             player.acceleration = sim.acceleration;
             player.driftIntensity = sim.driftIntensity;

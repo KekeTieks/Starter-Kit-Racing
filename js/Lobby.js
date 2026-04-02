@@ -1,4 +1,4 @@
-import { VEHICLE_STATS } from './VehicleStats.js';
+import { VEHICLE_STATS } from '../shared/VehicleStats.js';
 import { loadCircuits, generateMinimap, deleteCircuit } from './CircuitLibrary.js';
 import { VehicleCarousel, VEHICLE_KEYS } from './VehicleCarousel.js';
 import { gsap } from 'gsap';

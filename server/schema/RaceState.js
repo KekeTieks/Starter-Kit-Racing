@@ -10,10 +10,20 @@ export const PlayerState = schema({
     qy: "number",
     qz: "number",
     qw: { type: "number", default: 1 },
-    // Sphere linear velocity (for client reconciliation)
+    // Linear velocity (for client reconciliation)
     vx: "number",
     vy: "number",
     vz: "number",
+    // Angular velocity (for client reconciliation on slopes/ramps)
+    avx: "number",
+    avy: "number",
+    avz: "number",
+    // Last processed input sequence (for client-side prediction reconciliation)
+    lastInputSeq: "number",
+    // Server wall-clock timestamp when this state was computed (ms, for client extrapolation)
+    stateTs: "number",
+    // Whether the vehicle is airborne (all wheels off ground) — used by client reconciliation
+    airborne: { type: "boolean", default: false },
     // Values needed for client-side visuals (wheels, body tilt, particles, audio)
     linearSpeed: "number",
     acceleration: "number",

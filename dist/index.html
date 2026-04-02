@@ -7,6 +7,7 @@
 	<style>
 		body { margin: 0; overflow: hidden; background: #000; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
 		canvas { display: block; touch-action: none; }
+		canvas.hidden { display: none; }
 		#editor-link {
 			position: absolute;
 			bottom: 12px;
@@ -1124,6 +1125,16 @@
 		.ms-mode-icon { font-size: 24px; }
 		.ms-mode-title { font-size: 15px; font-weight: 800; }
 		.ms-mode-desc { font-size: 12px; color: rgba(255,255,255,0.4); }
+		.ms-mode-card--secondary {
+			background: rgba(255,255,255,0.03);
+			border-style: dashed;
+			border-color: rgba(255,255,255,0.08);
+		}
+		.ms-mode-card--secondary:hover {
+			background: rgba(255,255,255,0.08);
+			border-style: solid;
+			border-color: rgba(255,255,255,0.2);
+		}
 
 		.ms-divider {
 			height: 1px;
@@ -1995,20 +2006,12 @@
 		}
 		.hud-levelup-toast span:last-child { color: #fff; opacity: 0.9; }
 	</style>
-  <script type="module" crossorigin src="/assets/main-C7jauEUn.js"></script>
-  <link rel="modulepreload" crossorigin href="/assets/CircuitLibrary-Bc6s_vta.js">
+  <script type="module" crossorigin src="/assets/main-BYpk8Jch.js"></script>
+  <link rel="modulepreload" crossorigin href="/assets/CircuitLibrary-EBVyUUB7.js">
 </head>
 <body>
 	<div id="lobby"></div>
 	<div id="race-hud"></div>
-	<a id="editor-link" href="editor.html">Create your own track</a>
-	<script>
-		const map = new URLSearchParams( location.search ).get( 'map' );
-		if ( map ) {
-			const link = document.getElementById( 'editor-link' );
-			link.href = 'editor.html?map=' + map;
-			link.textContent = 'Edit this track';
-		}
-	</script>
+	<a id="editor-link" href="editor.html">Create your own track</a>
 </body>
 </html>

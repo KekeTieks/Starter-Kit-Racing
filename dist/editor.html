@@ -64,6 +64,11 @@
 			background: rgba(80, 180, 80, 0.4);
 			color: #fff;
 		}
+		#toolbar button.action:disabled {
+			background: rgba(80, 180, 80, 0.1);
+			color: rgba(140, 255, 140, 0.35);
+			cursor: default;
+		}
 
 		#toolbar button.danger {
 			color: rgba(255, 255, 255, 0.45);
@@ -93,6 +98,157 @@
 		}
 		#toast.show { opacity: 1; }
 
+		/* ── Modales ─────────────────────────────── */
+		.modal-overlay {
+			position: fixed;
+			inset: 0;
+			background: rgba(0, 0, 0, 0.6);
+			display: none;
+			align-items: center;
+			justify-content: center;
+			z-index: 100;
+		}
+		.modal-overlay.open { display: flex; }
+
+		.modal-box {
+			background: rgba(20, 20, 30, 0.97);
+			border: 1px solid rgba(255, 255, 255, 0.12);
+			border-radius: 16px;
+			padding: 24px 28px;
+			min-width: 320px;
+			max-width: 90vw;
+			box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
+			display: flex;
+			flex-direction: column;
+			gap: 16px;
+		}
+		.modal-box h3 {
+			margin: 0;
+			color: #fff;
+			font-size: 16px;
+			font-weight: 600;
+		}
+		.modal-box input[type="text"] {
+			width: 100%;
+			padding: 10px 14px;
+			background: rgba(255, 255, 255, 0.07);
+			border: 1px solid rgba(255, 255, 255, 0.15);
+			border-radius: 8px;
+			color: #fff;
+			font-size: 14px;
+			outline: none;
+			font-family: inherit;
+		}
+		.modal-box input[type="text"]:focus {
+			border-color: rgba(255, 255, 255, 0.35);
+		}
+		.modal-actions {
+			display: flex;
+			gap: 8px;
+			justify-content: flex-end;
+		}
+		.modal-actions button {
+			padding: 8px 18px;
+			border: none;
+			border-radius: 8px;
+			font-size: 13px;
+			font-weight: 500;
+			cursor: pointer;
+			font-family: inherit;
+			transition: all 0.15s;
+		}
+		.modal-actions .btn-primary {
+			background: rgba(80, 180, 80, 0.3);
+			color: rgba(140, 255, 140, 0.95);
+		}
+		.modal-actions .btn-primary:hover {
+			background: rgba(80, 180, 80, 0.5);
+			color: #fff;
+		}
+		.modal-actions .btn-secondary {
+			background: rgba(255, 255, 255, 0.08);
+			color: rgba(255, 255, 255, 0.6);
+		}
+		.modal-actions .btn-secondary:hover {
+			background: rgba(255, 255, 255, 0.15);
+			color: #fff;
+		}
+
+		/* ── Modal Load Library ──────────────────── */
+		#modal-load .modal-box {
+			min-width: 380px;
+			max-height: 80vh;
+		}
+		#modal-load-list {
+			display: flex;
+			flex-direction: column;
+			gap: 8px;
+			overflow-y: auto;
+			max-height: 50vh;
+			padding-right: 4px;
+		}
+		#modal-load-list::-webkit-scrollbar { width: 4px; }
+		#modal-load-list::-webkit-scrollbar-track { background: transparent; }
+		#modal-load-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
+
+		.library-item {
+			display: flex;
+			align-items: center;
+			gap: 14px;
+			padding: 10px 12px;
+			border-radius: 10px;
+			border: 1px solid rgba(255, 255, 255, 0.07);
+			cursor: pointer;
+			transition: all 0.15s;
+		}
+		.library-item:hover {
+			background: rgba(255, 255, 255, 0.07);
+			border-color: rgba(255, 255, 255, 0.15);
+		}
+		.library-item svg {
+			flex-shrink: 0;
+			border-radius: 4px;
+			background: rgba(0,0,0,0.3);
+		}
+		.library-item .lib-info { flex: 1; min-width: 0; }
+		.library-item .lib-name {
+			color: #fff;
+			font-size: 14px;
+			font-weight: 500;
+			white-space: nowrap;
+			overflow: hidden;
+			text-overflow: ellipsis;
+		}
+		.library-item .lib-tag {
+			color: rgba(255,255,255,0.35);
+			font-size: 11px;
+			margin-top: 2px;
+		}
+		.library-item .lib-delete {
+			padding: 4px 8px;
+			border: none;
+			border-radius: 6px;
+			background: transparent;
+			color: rgba(255,255,255,0.3);
+			font-size: 12px;
+			cursor: pointer;
+			transition: all 0.15s;
+			flex-shrink: 0;
+		}
+		.library-item .lib-delete:hover {
+			background: rgba(220, 80, 80, 0.25);
+			color: rgba(255, 140, 140, 0.9);
+		}
+		.library-empty {
+			color: rgba(255,255,255,0.35);
+			font-size: 13px;
+			text-align: center;
+			padding: 20px 0;
+		}
+		.modal-load-footer {
+			display: flex;
+			justify-content: flex-end;
+		}
 	</style>
 
 	<script type="importmap">
@@ -103,23 +259,100 @@
 		}
 	}
 	</script>
-  <script type="module" crossorigin src="/assets/editor-CRA75Zl3.js"></script>
-  <link rel="modulepreload" crossorigin href="/assets/CircuitLibrary-Bc6s_vta.js">
+  <script type="module" crossorigin src="/assets/editor-j2vomdrE.js"></script>
+  <link rel="modulepreload" crossorigin href="/assets/CircuitLibrary-EBVyUUB7.js">
 </head>
 <body>
+	<!-- Ramp config panel -->
+	<div id="ramp-panel" style="
+		display: none;
+		position: absolute;
+		bottom: 70px;
+		left: 50%;
+		transform: translateX(-50%);
+		background: rgba(20, 20, 30, 0.92);
+		backdrop-filter: blur(12px);
+		-webkit-backdrop-filter: blur(12px);
+		border: 1px solid rgba(255,255,255,0.1);
+		border-radius: 12px;
+		padding: 12px 16px;
+		z-index: 10;
+		display: none;
+		gap: 14px;
+		align-items: center;
+		flex-wrap: wrap;
+		min-width: 340px;
+	">
+		<label style="color:rgba(255,255,255,0.7);font-size:12px;display:flex;flex-direction:column;gap:4px;">
+			Longueur
+			<div style="display:flex;align-items:center;gap:6px;">
+				<input type="range" id="ramp-length" min="2" max="18" step="1" value="6" style="width:90px;">
+				<span id="ramp-length-val" style="color:#fff;font-size:12px;min-width:28px;">0.6</span>
+			</div>
+		</label>
+		<label style="color:rgba(255,255,255,0.7);font-size:12px;display:flex;flex-direction:column;gap:4px;">
+			Angle
+			<div style="display:flex;align-items:center;gap:6px;">
+				<input type="range" id="ramp-angle" min="5" max="35" step="1" value="15" style="width:90px;">
+				<span id="ramp-angle-val" style="color:#fff;font-size:12px;min-width:28px;">15°</span>
+			</div>
+		</label>
+		<label style="color:rgba(255,255,255,0.7);font-size:12px;display:flex;flex-direction:column;gap:4px;">
+			Largeur
+			<div style="display:flex;align-items:center;gap:6px;">
+				<input type="range" id="ramp-width" min="2" max="10" step="1" value="10" style="width:90px;">
+				<span id="ramp-width-val" style="color:#fff;font-size:12px;min-width:28px;">100%</span>
+			</div>
+		</label>
+	</div>
+
 	<div id="toolbar">
 		<button id="btn-road" class="active">Road</button>
+		<button id="btn-bump">Bump</button>
+		<button id="btn-ramp">Ramp</button>
+		<button id="btn-tunnel">Tunnel</button>
 		<button id="btn-checkpoint">Checkpoint</button>
 		<button id="btn-erase">Erase</button>
 		<div class="separator"></div>
+		<button id="btn-undo" class="action" disabled>Undo</button>
+		<button id="btn-redo" class="action" disabled>Redo</button>
+		<div class="separator"></div>
 		<button id="btn-play" class="action">Play</button>
 		<button id="btn-share" class="action">Share</button>
-		<button id="btn-save-library" class="action">Save to Library</button>
+		<button id="btn-load-library" class="action">Load</button>
+		<button id="btn-save-library" class="action">Save</button>
 		<div class="separator"></div>
 		<button id="btn-clear" class="danger">Clear</button>
 	</div>
 
 	<div id="toast"></div>
-
+
+	<!-- Modal Save to Library -->
+	<div id="modal-save" class="modal-overlay">
+		<div class="modal-box">
+			<h3 id="modal-save-title">Sauvegarder le circuit</h3>
+			<div id="modal-save-update-row" style="display:none; padding:10px 14px; background:rgba(80,180,80,0.1); border:1px solid rgba(80,180,80,0.25); border-radius:8px; font-size:13px; color:rgba(140,255,140,0.85);">
+				Mettre à jour <strong id="modal-save-current-name"></strong>
+			</div>
+			<input type="text" id="modal-save-name" placeholder="Nom du circuit" maxlength="40">
+			<div class="modal-actions">
+				<button class="btn-secondary" id="modal-save-cancel">Annuler</button>
+				<button class="btn-secondary" id="modal-save-as-new" style="display:none;">Nouveau circuit</button>
+				<button class="btn-primary" id="modal-save-confirm">Sauvegarder</button>
+			</div>
+		</div>
+	</div>
+
+	<!-- Modal Load from Library -->
+	<div id="modal-load" class="modal-overlay">
+		<div class="modal-box">
+			<h3>Bibliothèque de circuits</h3>
+			<div id="modal-load-list"></div>
+			<div class="modal-load-footer">
+				<button class="btn-secondary" id="modal-load-cancel" style="padding:8px 18px;border:none;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;font-family:inherit;background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.6);">Fermer</button>
+			</div>
+		</div>
+	</div>
+
 </body>
 </html>

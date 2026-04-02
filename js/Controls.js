@@ -1,4 +1,5 @@
 import nipplejs from 'nipplejs';
+import { keyBindings } from './KeyBindings.js';
 
 export class Controls {
 
@@ -99,15 +100,16 @@ export class Controls {
 
 		let x = 0, z = 0;
 
-		// ── Keyboard ────────────────────────────────────────────
-		if ( this.keys[ 'KeyA' ] || this.keys[ 'ArrowLeft' ] )  x -= 1;
-		if ( this.keys[ 'KeyD' ] || this.keys[ 'ArrowRight' ] ) x += 1;
-		if ( this.keys[ 'KeyW' ] || this.keys[ 'ArrowUp' ] )    z += 1;
-		if ( this.keys[ 'KeyS' ] || this.keys[ 'ArrowDown' ] )  z -= 1;
+		// ── Keyboard (configurable bindings) ────────────────────
+		const kb = keyBindings;
+		if ( kb.getKeys( 'left' ).some( ( k ) => this.keys[ k ] ) )     x -= 1;
+		if ( kb.getKeys( 'right' ).some( ( k ) => this.keys[ k ] ) )    x += 1;
+		if ( kb.getKeys( 'forward' ).some( ( k ) => this.keys[ k ] ) )  z += 1;
+		if ( kb.getKeys( 'backward' ).some( ( k ) => this.keys[ k ] ) ) z -= 1;
 
 		// ── Gamepad (single poll, cached index) ─────────────────
-		let handbrake = !! this.keys[ 'Space' ];
-		let nitro = !! this.keys[ 'ShiftLeft' ] || !! this.keys[ 'ShiftRight' ];
+		let handbrake = kb.getKeys( 'handbrake' ).some( ( k ) => this.keys[ k ] );
+		let nitro = kb.getKeys( 'nitro' ).some( ( k ) => this.keys[ k ] );
 
 		const gamepads = navigator.getGamepads();
 		let gp = this._gpIndex >= 0 ? gamepads[ this._gpIndex ] : null;

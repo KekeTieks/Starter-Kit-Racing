@@ -1,10 +1,8 @@
 // Track data utilities for Node.js (no Three.js dependency)
 
-import { parseCell } from '../../js/CellFormat.js';
-
-export const ORIENT_DEG = { 0: 0, 10: 180, 16: 90, 22: 270 };
-export const CELL_RAW = 9.99;
-export const GRID_SCALE = 0.75;
+import { parseCell } from '../../shared/CellFormat.js';
+export { ORIENT_DEG, CELL_RAW, GRID_SCALE } from '../../shared/TrackConstants.js';
+import { ORIENT_DEG, CELL_RAW, GRID_SCALE } from '../../shared/TrackConstants.js';
 
 export const DEFAULT_CELLS = [
     [ -3, -3, 'track-corner',   16 ],

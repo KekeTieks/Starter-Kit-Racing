@@ -1,4 +1,5 @@
 import { gsap } from 'gsap';
+import { keyBindings, keyDisplayName } from './KeyBindings.js';
 
 export class RaceHUD {
 
@@ -16,6 +17,7 @@ export class RaceHUD {
                 </div>
             </div>
             <div id="hud-results" class="hud-results"></div>
+            <div id="hud-pause" class="hud-pause"></div>
         `;
 
         this.countdownEl = document.getElementById( 'hud-countdown' );
@@ -23,9 +25,11 @@ export class RaceHUD {
         this.leaderboardEl = document.getElementById( 'hud-leaderboard' );
         this.resultsEl = document.getElementById( 'hud-results' );
         this.nitroFillEl = document.getElementById( 'hud-nitro-fill' );
+        this.pauseEl = document.getElementById( 'hud-pause' );
 
         this.lastCountdown = -1;
         this.mode = 'sandbox';
+        this.paused = false;
 
     }
 
@@ -286,8 +290,163 @@ export class RaceHUD {
 
         this.hideCountdown();
         this.hideResults();
+        this.hidePause();
         this.lapEl.textContent = '';
         this.leaderboardEl.innerHTML = '';
+
+    }
+
+    // ─── Pause menu ──────────────────────────────────────
+
+    showPause( onResume, onQuit ) {
+
+        this.paused = true;
+        this._pauseOnResume = onResume;
+        this._pauseOnQuit = onQuit;
+
+        this._renderPauseMain();
+
+    }
+
+    _renderPauseMain() {
+
+        this.pauseEl.innerHTML = `
+            <div class="hud-pause-panel">
+                <h2>Pause</h2>
+                <div class="hud-pause-actions">
+                    <button id="hud-btn-resume" class="hud-pause-btn hud-pause-btn-primary">Resume</button>
+                    <button id="hud-btn-controls" class="hud-pause-btn">Controls</button>
+                    <button id="hud-btn-quit" class="hud-pause-btn">Quit</button>
+                </div>
+            </div>
+        `;
+        this.pauseEl.style.display = 'flex';
+
+        gsap.fromTo( this.pauseEl.querySelector( '.hud-pause-panel' ),
+            { opacity: 0, y: 16, scale: 0.97 },
+            { opacity: 1, y: 0, scale: 1, duration: 0.25, ease: 'power3.out' }
+        );
+
+        document.getElementById( 'hud-btn-resume' ).addEventListener( 'click', this._pauseOnResume );
+        document.getElementById( 'hud-btn-quit' ).addEventListener( 'click', this._pauseOnQuit );
+        document.getElementById( 'hud-btn-controls' ).addEventListener( 'click', () => this._showKeybindings() );
+
+    }
+
+    _showKeybindings() {
+
+        const actions = keyBindings.getActions();
+
+        const rows = actions.map( ( a ) => {
+
+            const keyCells = a.keys.map( ( k, i ) =>
+                `<button class="kb-key-btn" data-action="${ a.action }" data-index="${ i }">${ keyDisplayName( k ) }</button>`
+            ).join( '' );
+
+            return `<div class="kb-row">
+                <span class="kb-label">${ a.label }</span>
+                <div class="kb-keys">${ keyCells }
+                    <button class="kb-add-btn" data-action="${ a.action }">+</button>
+                </div>
+            </div>`;
+
+        } ).join( '' );
+
+        this.pauseEl.innerHTML = `
+            <div class="hud-pause-panel hud-kb-panel">
+                <h2>Controls</h2>
+                <div class="kb-grid">${ rows }</div>
+                <div class="hud-pause-actions">
+                    <button id="kb-btn-back" class="hud-pause-btn hud-pause-btn-primary">Back</button>
+                    <button id="kb-btn-reset" class="hud-pause-btn">Reset Defaults</button>
+                </div>
+            </div>
+        `;
+
+        gsap.fromTo( this.pauseEl.querySelector( '.hud-pause-panel' ),
+            { opacity: 0, y: 16, scale: 0.97 },
+            { opacity: 1, y: 0, scale: 1, duration: 0.25, ease: 'power3.out' }
+        );
+
+        document.getElementById( 'kb-btn-back' ).addEventListener( 'click', () => this._renderPauseMain() );
+        document.getElementById( 'kb-btn-reset' ).addEventListener( 'click', () => {
+
+            keyBindings.resetAll();
+            this._showKeybindings();
+
+        } );
+
+        // Click on an existing key to rebind it
+        this.pauseEl.querySelectorAll( '.kb-key-btn' ).forEach( ( btn ) => {
+
+            btn.addEventListener( 'click', () => this._startRebind( btn.dataset.action, parseInt( btn.dataset.index ), btn ) );
+
+        } );
+
+        // Click + to add a new binding
+        this.pauseEl.querySelectorAll( '.kb-add-btn' ).forEach( ( btn ) => {
+
+            btn.addEventListener( 'click', () => this._startRebind( btn.dataset.action, -1, btn ) );
+
+        } );
+
+    }
+
+    _startRebind( action, index, btnEl ) {
+
+        // Mark as listening
+        const originalText = btnEl.textContent;
+        btnEl.textContent = '...';
+        btnEl.classList.add( 'kb-listening' );
+
+        const onKey = ( e ) => {
+
+            e.preventDefault();
+            e.stopPropagation();
+
+            // Escape cancels the rebind
+            if ( e.code === 'Escape' ) {
+
+                btnEl.textContent = originalText;
+                btnEl.classList.remove( 'kb-listening' );
+                window.removeEventListener( 'keydown', onKey, true );
+                return;
+
+            }
+
+            const keys = [ ...keyBindings.getKeys( action ) ];
+
+            if ( index >= 0 ) {
+
+                // Replace existing binding
+                keys[ index ] = e.code;
+
+            } else {
+
+                // Add new binding (avoid duplicates)
+                if ( ! keys.includes( e.code ) ) keys.push( e.code );
+
+            }
+
+            keyBindings.setKeys( action, keys );
+            window.removeEventListener( 'keydown', onKey, true );
+
+            // Re-render the keybindings screen
+            this._showKeybindings();
+
+        };
+
+        window.addEventListener( 'keydown', onKey, true );
+
+    }
+
+    hidePause() {
+
+        this.paused = false;
+        this._pauseOnResume = null;
+        this._pauseOnQuit = null;
+        this.pauseEl.style.display = 'none';
+        this.pauseEl.innerHTML = '';
 
     }
 

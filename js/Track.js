@@ -1,10 +1,7 @@
 import * as THREE from 'three';
-import { parseCell } from './CellFormat.js';
-
-export const ORIENT_DEG = { 0: 0, 10: 180, 16: 90, 22: 270 };
-
-export const CELL_RAW = 9.99;
-export const GRID_SCALE = 0.75;
+import { parseCell } from '../shared/CellFormat.js';
+export { ORIENT_DEG, CELL_RAW, GRID_SCALE } from '../shared/TrackConstants.js';
+import { ORIENT_DEG, CELL_RAW, GRID_SCALE } from '../shared/TrackConstants.js';
 
 // Build a procedural ramp mesh (wedge shape, front=low, back=high)
 // The vehicle approaches from +Z (front) and rises toward -Z (back).
@@ -55,6 +52,106 @@ export function buildRampMesh( rampLength, rampAngle, rampWidth ) {
 	mesh.receiveShadow = true;
 
 	return mesh;
+
+}
+
+// ── Shared tunnel cutout uniform ─────────────────────────
+// Updated every frame by updateTunnelOcclusion() in main.js.
+// Position is in trackGroup local space (unscaled by GRID_SCALE).
+export const tunnelCutoutUniforms = {
+	uVehiclePos: { value: new THREE.Vector3( 0, 0, 0 ) },
+	uCutoutRadius: { value: 2.5 },
+	uCutoutFade: { value: 3.0 },
+};
+
+// Patch a MeshStandardMaterial to add a circular cutout around the vehicle.
+function makeTunnelMaterial( color ) {
+
+	const mat = new THREE.MeshStandardMaterial( {
+		color,
+		roughness: 0.9,
+		metalness: 0.1,
+		transparent: true,
+		alphaTest: 0.01,
+	} );
+
+	mat.onBeforeCompile = ( shader ) => {
+
+		shader.uniforms.uVehiclePos = tunnelCutoutUniforms.uVehiclePos;
+		shader.uniforms.uCutoutRadius = tunnelCutoutUniforms.uCutoutRadius;
+		shader.uniforms.uCutoutFade = tunnelCutoutUniforms.uCutoutFade;
+
+		shader.vertexShader = 'varying vec3 vWorldPos;\n' + shader.vertexShader;
+		shader.vertexShader = shader.vertexShader.replace(
+			'#include <worldpos_vertex>',
+			`#include <worldpos_vertex>
+			vWorldPos = (modelMatrix * vec4( transformed, 1.0 )).xyz;`
+		);
+
+		shader.fragmentShader = `
+			uniform vec3 uVehiclePos;
+			uniform float uCutoutRadius;
+			uniform float uCutoutFade;
+			varying vec3 vWorldPos;
+		` + shader.fragmentShader;
+
+		shader.fragmentShader = shader.fragmentShader.replace(
+			'#include <dithering_fragment>',
+			`#include <dithering_fragment>
+			float cutDist = length( vWorldPos.xz - uVehiclePos.xz );
+			float cutAlpha = smoothstep( uCutoutRadius, uCutoutRadius + uCutoutFade, cutDist );
+			gl_FragColor.a *= cutAlpha;
+			if ( gl_FragColor.a < 0.01 ) discard;`
+		);
+
+	};
+
+	return mat;
+
+}
+
+// Build a procedural tunnel ceiling mesh.
+// Placeholder geometry — will be replaced by a GLB model later.
+// Returns a Group tagged with userData for occlusion.
+export function buildTunnelCeiling() {
+
+	const cellSize = CELL_RAW;
+
+	// Wall geometry constants (must match Physics.js)
+	const WALL_X = 4.75;
+	const WALL_HALF_H = 1.5;
+	const WALL_HALF_THICK = 0.25;
+
+	const ceilingY = 0.5 + WALL_HALF_H * 2; // top of walls
+	const ceilingThick = 0.3;
+
+	const group = new THREE.Group();
+
+	// ── Ceiling slab ─────────────────────────────────────────
+	const ceilGeo = new THREE.BoxGeometry( WALL_X * 2 + WALL_HALF_THICK * 2, ceilingThick, cellSize );
+	const ceilMat = makeTunnelMaterial( 0x555555 );
+	const ceilMesh = new THREE.Mesh( ceilGeo, ceilMat );
+	ceilMesh.position.y = ceilingY + ceilingThick / 2;
+	ceilMesh.castShadow = true;
+	ceilMesh.receiveShadow = true;
+	group.add( ceilMesh );
+
+	// ── Side walls (fill the gap between road walls and ceiling) ──
+	const wallHeight = WALL_HALF_H * 2;
+	const wallGeo = new THREE.BoxGeometry( WALL_HALF_THICK * 2, wallHeight, cellSize );
+	const wallMat = makeTunnelMaterial( 0x666666 );
+
+	for ( const side of [ -1, 1 ] ) {
+
+		const wall = new THREE.Mesh( wallGeo, wallMat );
+		wall.position.set( side * WALL_X, 0.5 + WALL_HALF_H, 0 );
+		wall.castShadow = true;
+		wall.receiveShadow = true;
+		group.add( wall );
+
+	}
+
+	return group;
 
 }
 
@@ -178,9 +275,11 @@ export function buildTrack( scene, models, customCells ) {
 
 	const cells = customCells || TRACK_CELLS;
 
+	const tunnelCeilings = [];
+
 	for ( const entry of cells ) {
 
-		const { gx, gz, type, orient, isBump, bumpOrient, rampLength, rampAngle, rampWidth } = parseCell( entry );
+		const { gx, gz, type, orient, isBump, bumpOrient, isTunnel, rampLength, rampAngle, rampWidth } = parseCell( entry );
 
 		// For track-ramp: render a road straight underneath + ramp mesh on top
 		const renderKey = type === 'track-ramp' ? 'track-straight' : type;
@@ -202,6 +301,19 @@ export function buildTrack( scene, models, customCells ) {
 
 			const bump = placePiece( models, 'track-bump', gx, gz, bumpOrient );
 			if ( bump ) trackPieceGroup.add( bump );
+
+		}
+
+		if ( isTunnel ) {
+
+			const tunnel = buildTunnelCeiling();
+			const deg = ORIENT_DEG[ orient ] ?? 0;
+			tunnel.position.set( ( gx + 0.5 ) * CELL_RAW, 0, ( gz + 0.5 ) * CELL_RAW );
+			tunnel.rotation.y = THREE.MathUtils.degToRad( deg );
+			tunnel.userData.tunnelGx = gx;
+			tunnel.userData.tunnelGz = gz;
+			trackPieceGroup.add( tunnel );
+			tunnelCeilings.push( tunnel );
 
 		}
 
@@ -413,7 +525,7 @@ export function buildTrack( scene, models, customCells ) {
 
 	}
 
-	return sceneObjects;
+	return { sceneObjects, tunnelCeilings };
 
 }
 

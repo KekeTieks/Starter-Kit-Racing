@@ -3,8 +3,8 @@
 // Also: mesh placement, cell resolution, persistence, and history management.
 
 import * as THREE from 'three';
-import { ORIENT_DEG, CELL_RAW, buildRampMesh } from '../Track.js';
-import { parseCell, serializeCell } from '../CellFormat.js';
+import { ORIENT_DEG, CELL_RAW, buildRampMesh, buildTunnelCeiling } from '../Track.js';
+import { parseCell, serializeCell } from '../../shared/CellFormat.js';
 import { grid, state, history, redoStack, MAX_HISTORY, cellKey } from './EditorState.js';
 import { models } from './EditorModels.js';
 import { trackGroup } from './EditorScene.js';
@@ -33,6 +33,7 @@ function snapshotGrid() {
 			isCheckpoint: cell.isCheckpoint,
 			isBump: cell.isBump,
 			bumpOrient: cell.bumpOrient,
+			isTunnel: cell.isTunnel,
 			rampLength: cell.rampLength,
 			rampAngle: cell.rampAngle,
 			rampWidth: cell.rampWidth,
@@ -59,6 +60,7 @@ export function restoreSnapshot( snap ) {
 
 		if ( cell.mesh ) trackGroup.remove( cell.mesh );
 		if ( cell.bumpMesh ) trackGroup.remove( cell.bumpMesh );
+		if ( cell.tunnelMesh ) trackGroup.remove( cell.tunnelMesh );
 		if ( cell.cpMarker ) trackGroup.remove( cell.cpMarker );
 
 	}
@@ -70,8 +72,9 @@ export function restoreSnapshot( snap ) {
 		const cell = {
 			type: s.type, orient: s.orient,
 			isFinish: s.isFinish, isCheckpoint: s.isCheckpoint, isBump: s.isBump, bumpOrient: s.bumpOrient,
+			isTunnel: s.isTunnel,
 			rampLength: s.rampLength, rampAngle: s.rampAngle, rampWidth: s.rampWidth,
-			mesh: null, bumpMesh: null, cpMarker: null,
+			mesh: null, bumpMesh: null, tunnelMesh: null, cpMarker: null,
 		};
 		grid.set( cellKey( s.gx, s.gz ), cell );
 		placeMesh( s.gx, s.gz, cell );
@@ -144,7 +147,9 @@ export function placeMesh( gx, gz, cell ) {
 	// Remove existing meshes
 	if ( cell.mesh ) trackGroup.remove( cell.mesh );
 	if ( cell.bumpMesh ) trackGroup.remove( cell.bumpMesh );
+	if ( cell.tunnelMesh ) trackGroup.remove( cell.tunnelMesh );
 	cell.bumpMesh = null;
+	cell.tunnelMesh = null;
 
 	// For track-ramp, render a road straight underneath + ramp mesh on top
 	const roadType = cell.type === 'track-ramp' ? 'track-straight' : cell.type;
@@ -168,6 +173,18 @@ export function placeMesh( gx, gz, cell ) {
 
 	// Bump overlay: place track-bump mesh on top of the road tile
 	cell.bumpMesh = cell.isBump ? spawnMesh( 'track-bump', gx, gz, cell.bumpOrient ?? cell.orient ) : null;
+
+	// Tunnel ceiling overlay
+	if ( cell.isTunnel ) {
+
+		const tunnel = buildTunnelCeiling();
+		tunnel.position.set( ( gx + 0.5 ) * CELL_RAW, 0, ( gz + 0.5 ) * CELL_RAW );
+		tunnel.rotation.y = THREE.MathUtils.degToRad( ORIENT_DEG[ cell.orient ] || 0 );
+		tunnel.traverse( ( c ) => { if ( c.isMesh ) { c.castShadow = true; c.receiveShadow = true; } } );
+		trackGroup.add( tunnel );
+		cell.tunnelMesh = tunnel;
+
+	}
 
 }
 
@@ -247,7 +264,7 @@ export function placeRoad( gx, gz ) {
 	}
 
 	pushHistory();
-	grid.set( key, { type: 'track-straight', orient: 0, isFinish: false, isCheckpoint: false, isBump: false, bumpOrient: undefined, mesh: null, bumpMesh: null, cpMarker: null } );
+	grid.set( key, { type: 'track-straight', orient: 0, isFinish: false, isCheckpoint: false, isBump: false, bumpOrient: undefined, isTunnel: false, mesh: null, bumpMesh: null, tunnelMesh: null, cpMarker: null } );
 	resolveCellAndNeighbors( gx, gz );
 	save();
 
@@ -306,9 +323,10 @@ export function placeRamp( gx, gz, rampLength, rampAngle, rampWidth ) {
 		cell.rampLength = rampLength;
 		cell.rampAngle  = rampAngle;
 		cell.rampWidth  = rampWidth;
-		// Remove any existing bump since ramp replaces it visually
+		// Remove any existing bump/tunnel since ramp replaces them visually
 		cell.isBump = false;
 		cell.bumpOrient = undefined;
+		cell.isTunnel = false;
 
 	}
 
@@ -347,9 +365,49 @@ export function removeBump( gx, gz ) {
 
 }
 
+export function placeTunnel( gx, gz ) {
+
+	const key = cellKey( gx, gz );
+	const cell = grid.get( key );
+
+	// Tunnel can only be placed on existing road (not finish, not ramp)
+	if ( ! cell || cell.isFinish || cell.type === 'track-ramp' ) return;
+
+	pushHistory();
+
+	if ( cell.isTunnel ) {
+
+		// Already a tunnel → remove it (toggle behavior)
+		cell.isTunnel = false;
+		if ( cell.tunnelMesh ) { trackGroup.remove( cell.tunnelMesh ); cell.tunnelMesh = null; }
+
+	} else {
+
+		cell.isTunnel = true;
+		placeMesh( gx, gz, cell );
+
+	}
+
+	save();
+
+}
+
+export function removeTunnel( gx, gz ) {
+
+	const key = cellKey( gx, gz );
+	const cell = grid.get( key );
+	if ( ! cell || ! cell.isTunnel ) return;
+
+	pushHistory();
+	cell.isTunnel = false;
+	if ( cell.tunnelMesh ) { trackGroup.remove( cell.tunnelMesh ); cell.tunnelMesh = null; }
+	save();
+
+}
+
 export function placeFinish() {
 
-	const cell = { type: 'track-finish', orient: 0, isFinish: true, isCheckpoint: false, isBump: false, bumpOrient: undefined, mesh: null, bumpMesh: null, cpMarker: null };
+	const cell = { type: 'track-finish', orient: 0, isFinish: true, isCheckpoint: false, isBump: false, bumpOrient: undefined, isTunnel: false, mesh: null, bumpMesh: null, tunnelMesh: null, cpMarker: null };
 	grid.set( cellKey( 0, 0 ), cell );
 	placeMesh( 0, 0, cell );
 
@@ -401,6 +459,7 @@ export function eraseRoad( gx, gz, clearGhostFn ) {
 
 	if ( cell.mesh ) trackGroup.remove( cell.mesh );
 	if ( cell.bumpMesh ) trackGroup.remove( cell.bumpMesh );
+	if ( cell.tunnelMesh ) trackGroup.remove( cell.tunnelMesh );
 	if ( cell.cpMarker ) trackGroup.remove( cell.cpMarker );
 	grid.delete( key );
 
@@ -423,6 +482,7 @@ export function clearAll( clearGhostFn ) {
 
 		if ( cell.mesh ) trackGroup.remove( cell.mesh );
 		if ( cell.bumpMesh ) trackGroup.remove( cell.bumpMesh );
+		if ( cell.tunnelMesh ) trackGroup.remove( cell.tunnelMesh );
 		if ( cell.cpMarker ) trackGroup.remove( cell.cpMarker );
 
 	}
@@ -469,10 +529,11 @@ function loadCellsArray( arr ) {
 			isCheckpoint: c.isCheckpoint,
 			isBump:       c.isBump,
 			bumpOrient:   c.bumpOrient,
+			isTunnel:     c.isTunnel,
 			rampLength:   c.rampLength,
 			rampAngle:    c.rampAngle,
 			rampWidth:    c.rampWidth,
-			mesh: null, bumpMesh: null, cpMarker: null,
+			mesh: null, bumpMesh: null, tunnelMesh: null, cpMarker: null,
 		};
 
 		grid.set( cellKey( c.gx, c.gz ), cell );

@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { state } from './EditorState.js';
 import { renderer, camera, camTarget, frustum, cellWorld } from './EditorScene.js';
-import { placeRoad, placeBump, placeRamp, toggleCheckpoint, eraseRoad } from './EditorCells.js';
+import { placeRoad, placeBump, placeRamp, placeTunnel, toggleCheckpoint, eraseRoad } from './EditorCells.js';
 import { updateGhost, clearGhost } from './EditorGhost.js';
 import { undo, redo } from './EditorCells.js';
 import { getRampParams } from './EditorUI.js';
@@ -95,6 +95,10 @@ function handleDraw( clientX, clientY ) {
 
 			const p = getRampParams();
 			placeRamp( cell.gx, cell.gz, p.rampLength, p.rampAngle, p.rampWidth );
+
+		} else if ( state.tool === 'tunnel' ) {
+
+			placeTunnel( cell.gx, cell.gz );
 
 		} else {
 
@@ -306,8 +310,10 @@ export function initInputListeners( selectToolFn, modalSaveEl, modalLoadEl ) {
 
 		} else if ( e.key === '1' ) { selectToolFn( 'road' );
 		} else if ( e.key === '2' ) { selectToolFn( 'bump' );
-		} else if ( e.key === '3' ) { selectToolFn( 'checkpoint' );
-		} else if ( e.key === '4' ) { selectToolFn( 'erase' );
+		} else if ( e.key === '3' ) { selectToolFn( 'ramp' );
+		} else if ( e.key === '4' ) { selectToolFn( 'tunnel' );
+		} else if ( e.key === '5' ) { selectToolFn( 'checkpoint' );
+		} else if ( e.key === '6' ) { selectToolFn( 'erase' );
 		} else if ( e.key === 'Escape' ) {
 
 			if ( modalSaveEl ) modalSaveEl.classList.remove( 'open' );

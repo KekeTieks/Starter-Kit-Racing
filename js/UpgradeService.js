@@ -1,5 +1,5 @@
 import { UPGRADE_CONFIG, MAX_UPGRADE_LEVEL } from './UpgradeConfig.js';
-import { VEHICLE_STATS } from './VehicleStats.js';
+import { VEHICLE_STATS } from '../shared/VehicleStats.js';
 
 class UpgradeService {
 

@@ -8,6 +8,7 @@ RUN npm install
 
 COPY index.html editor.html vite.config.js ./
 COPY js/ ./js/
+COPY shared/ ./shared/
 COPY public/ ./public/
 
 RUN npm run build
@@ -21,8 +22,12 @@ WORKDIR /app
 COPY server/package.json server/package-lock.json* ./server/
 RUN cd server && npm install --omit=dev
 
-# Server source
+# Server source + shared modules
 COPY server/ ./server/
+COPY shared/ ./shared/
+
+# Symlink node_modules so shared/ can resolve crashcat from server deps
+RUN ln -s /app/server/node_modules /app/shared/node_modules
 
 # Built client (dist/ → served as static files by express)
 COPY --from=client-build /app/dist ./dist

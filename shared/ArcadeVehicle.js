@@ -1,10 +1,9 @@
 // ArcadeVehicle.js — Pure math arcade vehicle physics module
-// No Three.js or crashcat dependency — shared between client and server
+// No Three.js or crashcat dependency — single source of truth for client and server
 
 const EPSILON = 0.001;
 
 // ── Weather physics multipliers ──────────────────────────────────────
-// Keep in sync with server/simulation/VehicleSim.js
 
 export const WEATHER_PHYSICS = {
 	clear: { gripMultiplier: 1.0,  dragMultiplier: 1.0 },
@@ -109,6 +108,7 @@ export class ArcadeVehicle {
 			torques: null, torqueCount: 0,
 			wheelData: this._wheelData,
 			driftIntensity: 0, linearSpeed: 0,
+			groundedCount: 0,
 		};
 
 		// Scratch
@@ -157,6 +157,7 @@ export class ArcadeVehicle {
 		v3ApplyQuat( this._up, [ 0, 1, 0 ], chassis.quaternion );
 
 		const speed = chassis.linearVelocity[ 0 ] * this._forward[ 0 ]
+			+ chassis.linearVelocity[ 1 ] * this._forward[ 1 ]
 			+ chassis.linearVelocity[ 2 ] * this._forward[ 2 ];
 		const absSpeed = Math.abs( speed );
 		const nitro = input.nitroMult || 1;
@@ -212,7 +213,10 @@ export class ArcadeVehicle {
 					this.prevCompression[ i ] = compression;
 
 					const wp = this._wheelWorldPos[ i ];
-					this._pushForce( 0, force, 0, wp[ 0 ], wp[ 1 ], wp[ 2 ] );
+					this._pushForce(
+						this._up[ 0 ] * force, this._up[ 1 ] * force, this._up[ 2 ] * force,
+						wp[ 0 ], wp[ 1 ], wp[ 2 ]
+					);
 
 				} else {
 
@@ -238,7 +242,7 @@ export class ArcadeVehicle {
 
 		if ( groundedCount > 0 ) {
 
-			const fwd0 = this._forward[ 0 ], fwd2 = this._forward[ 2 ];
+			const fwd0 = this._forward[ 0 ], fwd1 = this._forward[ 1 ], fwd2 = this._forward[ 2 ];
 
 			// Engine (with optional nitro multiplier)
 			if ( input.throttle > 0 ) {
@@ -246,7 +250,7 @@ export class ArcadeVehicle {
 				const nitro = input.nitroMult || 1;
 				const torqueCurve = 1 - speedFraction * 0.7;
 				const engineF = input.throttle * cfg.engineForce * torqueCurve * nitro;
-				this._pushForce( fwd0 * engineF, 0, fwd2 * engineF, cx, cy, cz );
+				this._pushForce( fwd0 * engineF, fwd1 * engineF, fwd2 * engineF, cx, cy, cz );
 
 			}
 
@@ -256,7 +260,7 @@ export class ArcadeVehicle {
 				if ( speed > 0.3 ) {
 
 					const brakeF = input.brake * cfg.brakeForce;
-					this._pushForce( - fwd0 * brakeF, 0, - fwd2 * brakeF, cx, cy, cz );
+					this._pushForce( - fwd0 * brakeF, - fwd1 * brakeF, - fwd2 * brakeF, cx, cy, cz );
 
 				} else {
 
@@ -264,7 +268,7 @@ export class ArcadeVehicle {
 					const reverseSpeedFrac = clamp( Math.abs( speed ) / reverseTopSpeed, 0, 1 );
 					const reverseCurve = 1 - reverseSpeedFrac * 0.8;
 					const revF = input.brake * cfg.engineForce * 0.5 * reverseCurve;
-					this._pushForce( - fwd0 * revF, 0, - fwd2 * revF, cx, cy, cz );
+					this._pushForce( - fwd0 * revF, - fwd1 * revF, - fwd2 * revF, cx, cy, cz );
 
 				}
 
@@ -274,7 +278,7 @@ export class ArcadeVehicle {
 			if ( input.handbrake && speed > 0.1 ) {
 
 				const hbForce = cfg.brakeForce * 0.45;
-				this._pushForce( - fwd0 * hbForce, 0, - fwd2 * hbForce, cx, cy, cz );
+				this._pushForce( - fwd0 * hbForce, - fwd1 * hbForce, - fwd2 * hbForce, cx, cy, cz );
 
 			}
 
@@ -283,18 +287,18 @@ export class ArcadeVehicle {
 
 				const engineBrakeF = absSpeed * cfg.mass * 0.8;
 				const dir = speed > 0 ? - 1 : 1;
-				this._pushForce( fwd0 * dir * engineBrakeF, 0, fwd2 * dir * engineBrakeF, cx, cy, cz );
+				this._pushForce( fwd0 * dir * engineBrakeF, fwd1 * dir * engineBrakeF, fwd2 * dir * engineBrakeF, cx, cy, cz );
 
 			}
 
 			// Drag
-			const vx = chassis.linearVelocity[ 0 ], vz = chassis.linearVelocity[ 2 ];
-			const velXZLen = Math.sqrt( vx * vx + vz * vz );
-			if ( velXZLen > EPSILON ) {
+			const vx = chassis.linearVelocity[ 0 ], vy = chassis.linearVelocity[ 1 ], vz = chassis.linearVelocity[ 2 ];
+			const velLen = Math.sqrt( vx * vx + vy * vy + vz * vz );
+			if ( velLen > EPSILON ) {
 
-				const dragF = velXZLen * velXZLen * cfg.dragCoefficient * _effectiveDrag + cfg.rollingResistance;
-				const inv = 1 / velXZLen;
-				this._pushForce( - vx * inv * dragF, 0, - vz * inv * dragF, cx, cy, cz );
+				const dragF = velLen * velLen * cfg.dragCoefficient * _effectiveDrag + cfg.rollingResistance;
+				const inv = 1 / velLen;
+				this._pushForce( - vx * inv * dragF, - vy * inv * dragF, - vz * inv * dragF, cx, cy, cz );
 
 			}
 
@@ -302,11 +306,29 @@ export class ArcadeVehicle {
 
 		// ── 3b. Downforce ────────────────────────────────────────
 		// At high speed, push the car down for more grip and stability
+		// Applied along chassis -up so it pushes into the surface on slopes
 
 		if ( groundedCount > 0 && absSpeed > 1 ) {
 
 			const downforceF = speedFraction * speedFraction * cfg.mass * 5;
-			this._pushForce( 0, - downforceF, 0, cx, cy, cz );
+			this._pushForce(
+				- this._up[ 0 ] * downforceF, - this._up[ 1 ] * downforceF, - this._up[ 2 ] * downforceF,
+				cx, cy, cz
+			);
+
+		}
+
+		// ── 3c-air. Anti-gravity glide ───────────────────────────────
+		// When airborne at speed, partially counteract the extra gravity so the
+		// vehicle "planes" through the air instead of dropping like a brick.
+		// Only active when launched with meaningful speed (ramp exit scenario).
+
+		if ( groundedCount === 0 && absSpeed > 3 ) {
+
+			// Counter 75% of the extra gravity (gravityFactor = 2.0 → extra = 1.0 × 9.81)
+			// Result: vehicle planes through the air with a gentle arc
+			const antiGravF = cfg.mass * 9.81 * 0.75;
+			this._pushForce( 0, antiGravF, 0, cx, cy, cz );
 
 		}
 
@@ -394,7 +416,7 @@ export class ArcadeVehicle {
 
 			const gripStrength = ( this.drifting ? this.currentRearGrip : cfg.gripFront ) * _effectiveGrip;
 			const latForce = - latSpeed * gripStrength * cfg.mass;
-			this._pushForce( this._right[ 0 ] * latForce, 0, this._right[ 2 ] * latForce, cx, cy, cz );
+			this._pushForce( this._right[ 0 ] * latForce, this._right[ 1 ] * latForce, this._right[ 2 ] * latForce, cx, cy, cz );
 
 			this.driftIntensity = clamp( Math.abs( latSpeed ) * 1.5, 0, 1 );
 
@@ -405,14 +427,15 @@ export class ArcadeVehicle {
 		}
 
 		// ── 6. Anti-roll ─────────────────────────────────────────
+		// Applied along chassis up axis so it works correctly on slopes
 
 		const frontDiff = this._suspCompression[ FL ] - this._suspCompression[ FR ];
 		if ( Math.abs( frontDiff ) > EPSILON ) {
 
 			const arf = frontDiff * cfg.antiRollStiffness;
 			const wFL = this._wheelWorldPos[ FL ], wFR = this._wheelWorldPos[ FR ];
-			this._pushForce( 0, - arf, 0, wFL[ 0 ], wFL[ 1 ], wFL[ 2 ] );
-			this._pushForce( 0, arf, 0, wFR[ 0 ], wFR[ 1 ], wFR[ 2 ] );
+			this._pushForce( - this._up[ 0 ] * arf, - this._up[ 1 ] * arf, - this._up[ 2 ] * arf, wFL[ 0 ], wFL[ 1 ], wFL[ 2 ] );
+			this._pushForce( this._up[ 0 ] * arf, this._up[ 1 ] * arf, this._up[ 2 ] * arf, wFR[ 0 ], wFR[ 1 ], wFR[ 2 ] );
 
 		}
 
@@ -421,36 +444,75 @@ export class ArcadeVehicle {
 
 			const arf = rearDiff * cfg.antiRollStiffness;
 			const wBL = this._wheelWorldPos[ BL ], wBR = this._wheelWorldPos[ BR ];
-			this._pushForce( 0, - arf, 0, wBL[ 0 ], wBL[ 1 ], wBL[ 2 ] );
-			this._pushForce( 0, arf, 0, wBR[ 0 ], wBR[ 1 ], wBR[ 2 ] );
+			this._pushForce( - this._up[ 0 ] * arf, - this._up[ 1 ] * arf, - this._up[ 2 ] * arf, wBL[ 0 ], wBL[ 1 ], wBL[ 2 ] );
+			this._pushForce( this._up[ 0 ] * arf, this._up[ 1 ] * arf, this._up[ 2 ] * arf, wBR[ 0 ], wBR[ 1 ], wBR[ 2 ] );
 
 		}
 
 		// ── 7. Upright correction + pitch/roll damping ───────────
+		// When grounded, align chassis up with the estimated ground normal
+		// (derived from wheel contact positions). In the air, align with world up.
 
-		const upY = this._up[ 1 ];
+		// Estimate ground normal from grounded wheel positions
+		const _targetUp = this._tmp1;
+		if ( groundedCount >= 3 ) {
 
-		if ( upY < 0.98 ) {
+			// Use wheel contact points to compute surface normal via cross products
+			// Front-to-back and left-to-right vectors on the surface
+			const wFL = this._wheelWorldPos[ FL ], wFR = this._wheelWorldPos[ FR ];
+			const wBL = this._wheelWorldPos[ BL ], wBR = this._wheelWorldPos[ BR ];
+			// Include ray hit depth to get actual contact Y
+			const rlength = cfg.suspensionRestLength + cfg.wheelRadius + 0.25;
+			const yFL = wFL[ 1 ] - ( this._grounded[ FL ] ? rayResults[ FL ].fraction * rlength : 0 );
+			const yFR = wFR[ 1 ] - ( this._grounded[ FR ] ? rayResults[ FR ].fraction * rlength : 0 );
+			const yBL = wBL[ 1 ] - ( this._grounded[ BL ] ? rayResults[ BL ].fraction * rlength : 0 );
+			const yBR = wBR[ 1 ] - ( this._grounded[ BR ] ? rayResults[ BR ].fraction * rlength : 0 );
 
-			// Stronger correction when grounded, gentler in the air to prevent free tumble
-			const torqueStrength = groundedCount > 0 ? 2000 : 300;
+			// Two surface vectors: right (FL→FR) and forward (BL→FL avg with BR→FR)
+			const rx = ( wFR[ 0 ] - wFL[ 0 ] + wBR[ 0 ] - wBL[ 0 ] ) * 0.5;
+			const ry = ( yFR - yFL + yBR - yBL ) * 0.5;
+			const rz = ( wFR[ 2 ] - wFL[ 2 ] + wBR[ 2 ] - wBL[ 2 ] ) * 0.5;
+			const fx = ( wFL[ 0 ] - wBL[ 0 ] + wFR[ 0 ] - wBR[ 0 ] ) * 0.5;
+			const fy = ( yFL - yBL + yFR - yBR ) * 0.5;
+			const fz = ( wFL[ 2 ] - wBL[ 2 ] + wFR[ 2 ] - wBR[ 2 ] ) * 0.5;
 
-			v3Cross( this._tmp1, this._up, [ 0, 1, 0 ] );
-			const sinAngle = v3Len( this._tmp1 );
-			if ( sinAngle > EPSILON ) {
+			// Normal = forward × right
+			_targetUp[ 0 ] = fy * rz - fz * ry;
+			_targetUp[ 1 ] = fz * rx - fx * rz;
+			_targetUp[ 2 ] = fx * ry - fy * rx;
+			v3Normalize( _targetUp, _targetUp );
 
-				v3Normalize( this._tmp1, this._tmp1 );
-				v3Scale( this._tmp1, this._tmp1, torqueStrength * sinAngle );
-				this._pushTorque( this._tmp1[ 0 ], this._tmp1[ 1 ], this._tmp1[ 2 ] );
+			// Safety: if normal points downward, fall back to world up
+			if ( _targetUp[ 1 ] < 0.5 ) v3Set( _targetUp, 0, 1, 0 );
 
-			}
+		} else {
+
+			v3Set( _targetUp, 0, 1, 0 );
 
 		}
 
-		// Damp pitch/roll — stronger when grounded, lighter in air
+		// Compute correction torque
+		v3Cross( this._tmp1, this._up, _targetUp );
+		const sinAngle = v3Len( this._tmp1 );
+
+		if ( sinAngle > EPSILON ) {
+
+			// In the air: minimal correction — let the vehicle hold its launch angle.
+			// Only correct strongly if tilted dangerously (> ~30°). This prevents
+			// the nose from diving toward world-up during jumps.
+			const torqueStrength = groundedCount > 0 ? 2000 : ( sinAngle > 0.5 ? 150 : 20 );
+			v3Normalize( this._tmp1, this._tmp1 );
+			v3Scale( this._tmp1, this._tmp1, torqueStrength * sinAngle );
+			this._pushTorque( this._tmp1[ 0 ], this._tmp1[ 1 ], this._tmp1[ 2 ] );
+
+		}
+
+		// Damp pitch/roll — stronger when grounded, very light in air for gliding feel
 		{
 
-			const dampFactor = groundedCount > 0 ? 800 : 150;
+			// In air: stronger pitch damping prevents nose-dive, keeps the vehicle
+			// stable in its launch orientation for a "gliding" feel.
+			const dampFactor = groundedCount > 0 ? 800 : 120;
 			const pitchRate = v3Dot( chassis.angularVelocity, this._right );
 			const rollRate = v3Dot( chassis.angularVelocity, this._forward );
 			const dampPitch = - pitchRate * dampFactor;
@@ -491,6 +553,7 @@ export class ArcadeVehicle {
 		r.torqueCount = this._torqueCount;
 		r.driftIntensity = this.driftIntensity;
 		r.linearSpeed = speed;
+		r.groundedCount = groundedCount;
 		return r;
 
 	}

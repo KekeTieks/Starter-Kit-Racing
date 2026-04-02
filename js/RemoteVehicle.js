@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { USE_ARCADE_VEHICLE } from './VehicleStats.js';
 import { applyCosmetics } from './CosmeticApplicator.js';
 
 const _FALLBACK_FRONT = [
@@ -135,10 +134,9 @@ export class RemoteVehicle {
         this.spherePos.y += ( serverState.sy - this.spherePos.y ) * lerpFactor;
         this.spherePos.z += ( serverState.sz - this.spherePos.z ) * lerpFactor;
 
-        const yOffset = USE_ARCADE_VEHICLE ? 0 : - 0.5;
         this.container.position.set(
             this.spherePos.x,
-            this.spherePos.y + yOffset,
+            this.spherePos.y,
             this.spherePos.z
         );
 
@@ -171,31 +169,11 @@ export class RemoteVehicle {
 
         if ( ! this.bodyNode ) return;
 
-        if ( USE_ARCADE_VEHICLE ) {
+        const targetPitch = THREE.MathUtils.clamp( -this.inputZ * 0.12, -0.15, 0.15 );
+        const targetRoll = THREE.MathUtils.clamp( -( this.inputX / 5 ) * Math.min( Math.abs( this.linearSpeed ) / 5, 1 ), -0.2, 0.2 );
 
-            // In arcade mode, linearSpeed is in m/s (can reach ~10). Use inputZ to derive
-            // a pitch that matches what the local arcade body produces (~±0.15 rad max).
-            const targetPitch = THREE.MathUtils.clamp( -this.inputZ * 0.12, -0.15, 0.15 );
-            const targetRoll = THREE.MathUtils.clamp( -( this.inputX / 5 ) * Math.min( Math.abs( this.linearSpeed ) / 5, 1 ), -0.2, 0.2 );
-
-            this.bodyNode.rotation.x = lerpAngle( this.bodyNode.rotation.x, targetPitch, dt * 8 );
-            this.bodyNode.rotation.z = lerpAngle( this.bodyNode.rotation.z, targetRoll, dt * 8 );
-
-        } else {
-
-            this.bodyNode.rotation.x = lerpAngle(
-                this.bodyNode.rotation.x,
-                -( this.linearSpeed - this.acceleration ) / 6,
-                dt * 10
-            );
-
-            this.bodyNode.rotation.z = lerpAngle(
-                this.bodyNode.rotation.z,
-                -( this.inputX / 5 ) * this.linearSpeed,
-                dt * 5
-            );
-
-        }
+        this.bodyNode.rotation.x = lerpAngle( this.bodyNode.rotation.x, targetPitch, dt * 8 );
+        this.bodyNode.rotation.z = lerpAngle( this.bodyNode.rotation.z, targetRoll, dt * 8 );
 
         this.bodyNode.position.y = THREE.MathUtils.lerp( this.bodyNode.position.y, 0.2, dt * 5 );
 

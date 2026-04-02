@@ -1,6 +1,5 @@
 import { rigidBody } from 'crashcat';
-import { ArcadeVehicle } from './ArcadeVehicle.js';
-import { USE_ARCADE_VEHICLE } from './VehicleStats.js';
+import { ArcadeVehicle } from '../../shared/ArcadeVehicle.js';
 import { castWheelRay } from './PhysicsWorld.js';
 
 const LINEAR_DAMP = 0.1;
@@ -114,6 +113,7 @@ export class VehicleSim {
         this.touchActive = false;
         this.handbrake = false;
         this.nitroInput = false;
+        this.lastInputSeq = 0;
 
         // Nitro state (must match client Vehicle.js constants)
         this.nitroGauge = 1;
@@ -135,7 +135,6 @@ export class VehicleSim {
         this.bodyRotZ = 0;
 
         // Arcade vehicle
-        this._useArcade = USE_ARCADE_VEHICLE;
         this._arcadeVehicle = null;
         this._rayFilter = null;
 
@@ -155,11 +154,7 @@ export class VehicleSim {
         this._rayOrigin = [ 0, 0, 0 ];
         this._wheelWorldOff = [ 0, 0, 0 ];
 
-        if ( this._useArcade ) {
-
-            this._arcadeVehicle = new ArcadeVehicle( this._stats );
-
-        }
+        this._arcadeVehicle = new ArcadeVehicle( this._stats );
 
     }
 
@@ -170,6 +165,7 @@ export class VehicleSim {
         this.touchActive = !! input.touchActive;
         this.handbrake = !! input.handbrake;
         this.nitroInput = !! input.nitro;
+        if ( input.seq !== undefined ) this.lastInputSeq = input.seq;
 
     }
 
@@ -178,15 +174,7 @@ export class VehicleSim {
 
         if ( dt <= 0 ) return;
 
-        if ( this._useArcade ) {
-
-            this._applyInputArcade( dt );
-
-        } else {
-
-            this._applyInputLegacy( dt );
-
-        }
+        this._applyInputArcade( dt );
 
     }
 
@@ -326,83 +314,9 @@ export class VehicleSim {
 
         this.linearSpeed = result.linearSpeed;
         this.driftIntensity = result.driftIntensity;
+        this.airborne = result.groundedCount === 0;
 
         // Store processed inputX for client visuals
-        this.inputX = inputX;
-
-    }
-
-    // ── Legacy sphere input ──────────────────────────────────────
-
-    _applyInputLegacy( dt ) {
-
-        let inputX = this.inputX;
-        let inputZ = this.inputZ;
-
-        if ( this.touchActive && ( inputX !== 0 || inputZ !== 0 ) ) {
-
-            const targetAngle = Math.atan2( inputX, inputZ );
-            const targetQuat = quatFromAxisAngle( [ 0, 1, 0 ], targetAngle );
-            this.quat = quatSlerp( this.quat, targetQuat, 1 - Math.exp( -3 * dt ) );
-            this.quat = quatNormalize( this.quat );
-
-            const forward = applyQuatToVec3( this.quat, [ 0, 0, 1 ] );
-            const cross = forward[ 0 ] * inputZ - forward[ 2 ] * inputX;
-            inputX = -cross * 2;
-
-            this.linearSpeed = lerp( this.linearSpeed, this._stats.maxSpeed, dt * this._stats.accelRate );
-
-        } else {
-
-            let direction = Math.sign( this.linearSpeed );
-            if ( direction === 0 ) direction = Math.abs( inputZ ) > 0.1 ? Math.sign( inputZ ) : 1;
-
-            const steeringGrip = clamp( Math.abs( this.linearSpeed ), 0.2, 1.0 );
-            const targetAngular = -inputX * steeringGrip * this._stats.steeringMult * direction;
-            this.angularSpeed = lerp( this.angularSpeed, targetAngular, dt * 4 );
-
-            const rotQuat = quatFromAxisAngle( [ 0, 1, 0 ], this.angularSpeed * dt );
-            this.quat = quatMultiply( this.quat, rotQuat );
-            this.quat = quatNormalize( this.quat );
-
-            const targetSpeed = inputZ * this._stats.maxSpeed;
-
-            if ( targetSpeed < 0 && this.linearSpeed > 0.01 ) {
-
-                this.linearSpeed = lerp( this.linearSpeed, 0.0, dt * 8 );
-
-            } else if ( targetSpeed < 0 ) {
-
-                this.linearSpeed = lerp( this.linearSpeed, targetSpeed / 2, dt * 2 );
-
-            } else {
-
-                this.linearSpeed = lerp( this.linearSpeed, targetSpeed, dt * this._stats.accelRate );
-
-            }
-
-        }
-
-        this.linearSpeed *= Math.max( 0, 1 - LINEAR_DAMP * dt );
-
-        if ( this.body ) {
-
-            const right = applyQuatToVec3( this.quat, [ 1, 0, 0 ] );
-            const rLen = Math.sqrt( right[ 0 ] * right[ 0 ] + right[ 2 ] * right[ 2 ] );
-            const rx = rLen > 0 ? right[ 0 ] / rLen : 0;
-            const rz = rLen > 0 ? right[ 2 ] / rLen : 0;
-
-            const angvel = this.body.motionProperties.angularVelocity;
-            const drive = this.linearSpeed * this._stats.driveMult * dt;
-
-            rigidBody.setAngularVelocity( this.world, this.body, [
-                angvel[ 0 ] + rx * drive,
-                angvel[ 1 ],
-                angvel[ 2 ] + rz * drive
-            ] );
-
-        }
-
         this.inputX = inputX;
 
     }
@@ -419,23 +333,19 @@ export class VehicleSim {
             this.spherePos[ 1 ] = pos[ 1 ];
             this.spherePos[ 2 ] = pos[ 2 ];
 
-            if ( this._useArcade ) {
+            // Read quaternion from chassis body and re-normalize to prevent
+            // floating-point drift that accumulates over time and causes
+            // client slerp errors (NaN dot products, ghost snaps).
+            const q = this.body.quaternion;
+            const len = Math.sqrt( q[ 0 ] * q[ 0 ] + q[ 1 ] * q[ 1 ] + q[ 2 ] * q[ 2 ] + q[ 3 ] * q[ 3 ] );
+            if ( len > 0.0001 ) {
 
-                // Read quaternion from chassis body and re-normalize to prevent
-                // floating-point drift that accumulates over time and causes
-                // client slerp errors (NaN dot products, ghost snaps).
-                const q = this.body.quaternion;
-                const len = Math.sqrt( q[ 0 ] * q[ 0 ] + q[ 1 ] * q[ 1 ] + q[ 2 ] * q[ 2 ] + q[ 3 ] * q[ 3 ] );
-                if ( len > 0.0001 ) {
+                const inv = 1 / len;
+                this.quat = [ q[ 0 ] * inv, q[ 1 ] * inv, q[ 2 ] * inv, q[ 3 ] * inv ];
 
-                    const inv = 1 / len;
-                    this.quat = [ q[ 0 ] * inv, q[ 1 ] * inv, q[ 2 ] * inv, q[ 3 ] * inv ];
+            } else {
 
-                } else {
-
-                    this.quat = [ 0, 0, 0, 1 ];
-
-                }
+                this.quat = [ 0, 0, 0, 1 ];
 
             }
 
@@ -460,11 +370,7 @@ export class VehicleSim {
                 rigidBody.setLinearVelocity( this.world, this.body, [ 0, 0, 0 ] );
                 rigidBody.setAngularVelocity( this.world, this.body, [ 0, 0, 0 ] );
 
-                if ( this._useArcade ) {
-
-                    rigidBody.setQuaternion( this.world, this.body, resetQuat, false );
-
-                }
+                rigidBody.setQuaternion( this.world, this.body, resetQuat, false );
 
             }
 
@@ -477,22 +383,6 @@ export class VehicleSim {
             this.quat = [ ...resetQuat ];
 
             if ( this._arcadeVehicle ) this._arcadeVehicle.reset();
-
-        }
-
-        // Model velocity for drift calc (legacy path)
-        if ( ! this._useArcade ) {
-
-            const modelX = this.spherePos[ 0 ];
-            const modelZ = this.spherePos[ 2 ];
-            this.modelVelX = ( modelX - this.prevPosX ) / dt;
-            this.modelVelZ = ( modelZ - this.prevPosZ ) / dt;
-            this.prevPosX = modelX;
-            this.prevPosZ = modelZ;
-
-            this.bodyRotZ = lerpAngle( this.bodyRotZ, -( this.inputX / 5 ) * this.linearSpeed, dt * 5 );
-            this.driftIntensity = Math.abs( this.linearSpeed - this.acceleration ) +
-                Math.abs( this.bodyRotZ ) * 2;
 
         }
 

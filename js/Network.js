@@ -18,7 +18,9 @@ export class Network {
         this._lastInputZ = 0;
         this._lastTouchActive = false;
         this._lastHandbrake = false;
+        this._lastNitro = false;
         this._inputIdleFrames = 0;
+        this._inputSeq = 0;
 
         // Callbacks
         this.onPlayerAdd = null;
@@ -151,6 +153,12 @@ export class Network {
                     sqx: player.qx, sqy: player.qy, sqz: player.qz, sqw: player.qw,
                     // Server linear velocity (for reconciliation)
                     svx: player.vx, svy: player.vy, svz: player.vz,
+                    // Server angular velocity
+                    savx: player.avx, savy: player.avy, savz: player.avz,
+                    // Last processed input seq
+                    lastInputSeq: player.lastInputSeq,
+                    stateTs: player.stateTs || 0,
+                    airborne: player.airborne || false,
                     // Gameplay values (used directly, no lerp needed)
                     linearSpeed: player.linearSpeed,
                     acceleration: player.acceleration,
@@ -182,6 +190,10 @@ export class Network {
                 s.sx = player.x; s.sy = player.y; s.sz = player.z;
                 s.sqx = player.qx; s.sqy = player.qy; s.sqz = player.qz; s.sqw = player.qw;
                 s.svx = player.vx; s.svy = player.vy; s.svz = player.vz;
+                s.savx = player.avx; s.savy = player.avy; s.savz = player.avz;
+                s.lastInputSeq = player.lastInputSeq;
+                s.stateTs = player.stateTs || 0;
+                s.airborne = player.airborne || false;
                 s.linearSpeed = player.linearSpeed;
                 s.acceleration = player.acceleration;
                 s.driftIntensity = player.driftIntensity;
@@ -259,6 +271,7 @@ export class Network {
         const touch = !! input.touchActive;
         const hb = !! input.handbrake;
         const nitro = !! input.nitro;
+        const seq = ++ this._inputSeq;
 
         const changed = x !== this._lastInputX || z !== this._lastInputZ || touch !== this._lastTouchActive || hb !== this._lastHandbrake || nitro !== this._lastNitro;
 
@@ -270,18 +283,20 @@ export class Network {
             this._lastHandbrake = hb;
             this._lastNitro = nitro;
             this._inputIdleFrames = 0;
-            this.room.send( 'input', { x, z, touchActive: touch, handbrake: hb, nitro } );
+            this.room.send( 'input', { seq, x, z, touchActive: touch, handbrake: hb, nitro } );
 
         } else {
 
             this._inputIdleFrames++;
             if ( this._inputIdleFrames % 10 === 0 ) {
 
-                this.room.send( 'input', { x, z, touchActive: touch, handbrake: hb, nitro } );
+                this.room.send( 'input', { seq, x, z, touchActive: touch, handbrake: hb, nitro } );
 
             }
 
         }
+
+        return seq;
 
     }
 

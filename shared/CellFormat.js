@@ -10,6 +10,7 @@
  *   isCheckpoint: boolean,
  *   isBump:      boolean,
  *   bumpOrient:  number,   // same domain as orient; only meaningful when isBump=true
+ *   isTunnel:    boolean,  // adds tunnel ceiling overlay (mutually exclusive with track-ramp)
  *   rampLength:  number,   // 0.1–3.0, only meaningful when type='track-ramp'
  *   rampAngle:   number,   // 5–45 deg, only meaningful when type='track-ramp'
  *   rampWidth:   number,   // 0.1–2.0, only meaningful when type='track-ramp'
@@ -37,6 +38,7 @@ export function parseCell( entry ) {
 			isCheckpoint: entry.isCheckpoint ?? false,
 			isBump:       entry.isBump       ?? false,
 			bumpOrient:   entry.bumpOrient   ?? entry.orient,
+			isTunnel:     entry.isTunnel     ?? false,
 			rampLength:   entry.rampLength   ?? 1.0,
 			rampAngle:    entry.rampAngle    ?? 15,
 			rampWidth:    entry.rampWidth    ?? 1.0,
@@ -57,6 +59,7 @@ export function parseCell( entry ) {
 			isCheckpoint: entry[ 4 ] === true,
 			isBump:       false,
 			bumpOrient:   orient,
+			isTunnel:     false,
 			rampLength:   entry[ 5 ] ?? 1.0,
 			rampAngle:    entry[ 6 ] ?? 15,
 			rampWidth:    entry[ 7 ] ?? 1.0,
@@ -72,6 +75,7 @@ export function parseCell( entry ) {
 		isCheckpoint: entry[ 4 ] === true,
 		isBump:       entry[ 5 ] === true,
 		bumpOrient:   entry[ 6 ] !== undefined ? entry[ 6 ] : orient,
+		isTunnel:     false,
 		rampLength:   1.0,
 		rampAngle:    15,
 		rampWidth:    1.0,
@@ -94,6 +98,7 @@ export function serializeCell( gx, gz, cell ) {
 		isCheckpoint: cell.isCheckpoint ?? false,
 		isBump:       cell.isBump       ?? false,
 		bumpOrient:   cell.bumpOrient   ?? cell.orient,
+		isTunnel:     cell.isTunnel     ?? false,
 	};
 
 	if ( cell.type === 'track-ramp' ) {

@@ -1,5 +1,5 @@
 import { profileService } from './ProfileService.js';
-import { parseCell } from './CellFormat.js';
+import { parseCell } from '../shared/CellFormat.js';
 
 // Colors per track piece type for the minimap SVG
 const MINIMAP_COLORS = {

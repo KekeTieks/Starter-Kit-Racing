@@ -2,7 +2,7 @@
 // Toolbar, toast, modal Save, modal Load, circuit validation UI.
 
 import { saveCircuit, updateCircuit, loadCircuits, deleteCircuit, generateMinimap } from '../CircuitLibrary.js';
-import { parseCell } from '../CellFormat.js';
+import { parseCell } from '../../shared/CellFormat.js';
 import { state } from './EditorState.js';
 import { grid, cellKey } from './EditorState.js';
 import { getCellsArray, save, clearAll, validateCircuit, placeFinish, loadSaved, placeRamp } from './EditorCells.js';
@@ -34,6 +34,7 @@ export function selectTool( t ) {
 	document.getElementById( 'btn-road' ).classList.toggle( 'active', t === 'road' );
 	document.getElementById( 'btn-bump' ).classList.toggle( 'active', t === 'bump' );
 	document.getElementById( 'btn-ramp' ).classList.toggle( 'active', t === 'ramp' );
+	document.getElementById( 'btn-tunnel' ).classList.toggle( 'active', t === 'tunnel' );
 	document.getElementById( 'btn-checkpoint' ).classList.toggle( 'active', t === 'checkpoint' );
 	document.getElementById( 'btn-erase' ).classList.toggle( 'active', t === 'erase' );
 
@@ -49,6 +50,7 @@ export function initToolbarListeners() {
 	document.getElementById( 'btn-road' ).addEventListener( 'click', () => selectTool( 'road' ) );
 	document.getElementById( 'btn-bump' ).addEventListener( 'click', () => selectTool( 'bump' ) );
 	document.getElementById( 'btn-ramp' ).addEventListener( 'click', () => selectTool( 'ramp' ) );
+	document.getElementById( 'btn-tunnel' ).addEventListener( 'click', () => selectTool( 'tunnel' ) );
 	document.getElementById( 'btn-checkpoint' ).addEventListener( 'click', () => selectTool( 'checkpoint' ) );
 	document.getElementById( 'btn-erase' ).addEventListener( 'click', () => selectTool( 'erase' ) );
 
@@ -296,6 +298,7 @@ export function initLoadModal() {
 
 			if ( cell.mesh ) trackGroup.remove( cell.mesh );
 			if ( cell.bumpMesh ) trackGroup.remove( cell.bumpMesh );
+			if ( cell.tunnelMesh ) trackGroup.remove( cell.tunnelMesh );
 			if ( cell.cpMarker ) trackGroup.remove( cell.cpMarker );
 
 		}
@@ -312,10 +315,11 @@ export function initLoadModal() {
 				isCheckpoint: c.isCheckpoint,
 				isBump:       c.isBump,
 				bumpOrient:   c.bumpOrient,
+				isTunnel:     c.isTunnel,
 				rampLength:   c.rampLength,
 				rampAngle:    c.rampAngle,
 				rampWidth:    c.rampWidth,
-				mesh: null, bumpMesh: null, cpMarker: null,
+				mesh: null, bumpMesh: null, tunnelMesh: null, cpMarker: null,
 			};
 			grid.set( cellKey( c.gx, c.gz ), cell );
 			placeMesh( c.gx, c.gz, cell );

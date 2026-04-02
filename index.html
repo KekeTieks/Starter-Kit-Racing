@@ -1956,6 +1956,142 @@
 			margin: 0;
 			letter-spacing: 0.05em;
 		}
+		/* ── Pause menu ── */
+		.hud-pause {
+			position: fixed;
+			inset: 0;
+			display: none;
+			align-items: center;
+			justify-content: center;
+			background: rgba(0,0,0,0.75);
+			backdrop-filter: blur(12px);
+			z-index: 35;
+		}
+		.hud-pause-panel {
+			text-align: center;
+			color: #fff;
+			pointer-events: auto;
+			background: rgba(255,255,255,0.05);
+			border: 1px solid rgba(255,255,255,0.12);
+			border-radius: 20px;
+			padding: 36px 48px 32px;
+			min-width: 280px;
+			box-shadow: 0 24px 64px rgba(0,0,0,0.5);
+		}
+		.hud-pause-panel h2 {
+			font-size: 13px;
+			letter-spacing: 0.18em;
+			text-transform: uppercase;
+			font-weight: 700;
+			margin: 0 0 28px;
+			opacity: 0.5;
+		}
+		.hud-pause-actions {
+			display: flex;
+			flex-direction: column;
+			gap: 10px;
+		}
+		.hud-pause-btn {
+			width: 100%;
+			padding: 12px 20px;
+			border-radius: 10px;
+			font-size: 15px;
+			font-weight: 600;
+			border: 1px solid rgba(255,255,255,0.15);
+			background: rgba(255,255,255,0.08);
+			color: #fff;
+			cursor: pointer;
+			transition: background 0.15s, border-color 0.15s;
+		}
+		.hud-pause-btn:hover {
+			background: rgba(255,255,255,0.15);
+			border-color: rgba(255,255,255,0.3);
+		}
+		.hud-pause-btn-primary {
+			background: #fff;
+			color: #111;
+			border-color: #fff;
+		}
+		.hud-pause-btn-primary:hover {
+			background: rgba(255,255,255,0.88);
+			border-color: rgba(255,255,255,0.88);
+		}
+		/* ── Keybindings screen ── */
+		.hud-kb-panel {
+			min-width: 380px;
+			max-width: 440px;
+		}
+		.kb-grid {
+			display: flex;
+			flex-direction: column;
+			gap: 6px;
+			margin-bottom: 24px;
+		}
+		.kb-row {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			padding: 8px 0;
+			border-bottom: 1px solid rgba(255,255,255,0.06);
+		}
+		.kb-row:last-child { border-bottom: none; }
+		.kb-label {
+			font-size: 14px;
+			font-weight: 600;
+			opacity: 0.85;
+			min-width: 100px;
+			text-align: left;
+		}
+		.kb-keys {
+			display: flex;
+			gap: 6px;
+			align-items: center;
+			flex-wrap: wrap;
+			justify-content: flex-end;
+		}
+		.kb-key-btn {
+			padding: 5px 12px;
+			border-radius: 6px;
+			font-size: 13px;
+			font-weight: 600;
+			border: 1px solid rgba(255,255,255,0.2);
+			background: rgba(255,255,255,0.08);
+			color: #fff;
+			cursor: pointer;
+			transition: all 0.15s;
+			min-width: 36px;
+			text-align: center;
+		}
+		.kb-key-btn:hover {
+			background: rgba(255,255,255,0.18);
+			border-color: rgba(255,255,255,0.4);
+		}
+		.kb-key-btn.kb-listening {
+			background: rgba(74,158,255,0.25);
+			border-color: rgba(74,158,255,0.7);
+			color: rgba(74,158,255,1);
+			animation: kb-pulse 1s ease-in-out infinite;
+		}
+		@keyframes kb-pulse {
+			0%, 100% { opacity: 1; }
+			50% { opacity: 0.6; }
+		}
+		.kb-add-btn {
+			padding: 5px 10px;
+			border-radius: 6px;
+			font-size: 13px;
+			font-weight: 700;
+			border: 1px dashed rgba(255,255,255,0.15);
+			background: transparent;
+			color: rgba(255,255,255,0.35);
+			cursor: pointer;
+			transition: all 0.15s;
+		}
+		.kb-add-btn:hover {
+			border-color: rgba(255,255,255,0.35);
+			color: rgba(255,255,255,0.7);
+			background: rgba(255,255,255,0.05);
+		}
 		.hud-reward-toast {
 			position: fixed;
 			bottom: 80px;
@@ -2005,9 +2141,59 @@
 			letter-spacing: 0.12em;
 		}
 		.hud-levelup-toast span:last-child { color: #fff; opacity: 0.9; }
+		/* ── Loading screen ── */
+		#loading-screen {
+			position: fixed;
+			inset: 0;
+			display: flex;
+			flex-direction: column;
+			align-items: center;
+			justify-content: center;
+			background: #111;
+			z-index: 50;
+			transition: opacity 0.4s ease;
+		}
+		#loading-screen.fade-out {
+			opacity: 0;
+			pointer-events: none;
+		}
+		.loading-title {
+			font-size: 48px;
+			font-weight: 800;
+			color: #fff;
+			letter-spacing: 3px;
+			margin-bottom: 40px;
+		}
+		.loading-bar-track {
+			width: 280px;
+			height: 4px;
+			background: rgba(255,255,255,0.1);
+			border-radius: 2px;
+			overflow: hidden;
+		}
+		.loading-bar-fill {
+			width: 0%;
+			height: 100%;
+			background: #fff;
+			border-radius: 2px;
+			transition: width 0.15s ease;
+		}
+		.loading-label {
+			margin-top: 16px;
+			font-size: 13px;
+			color: rgba(255,255,255,0.35);
+			letter-spacing: 0.08em;
+		}
 	</style>
 </head>
 <body>
+	<div id="loading-screen">
+		<div class="loading-title">MY RACE</div>
+		<div class="loading-bar-track">
+			<div id="loading-bar-fill" class="loading-bar-fill"></div>
+		</div>
+		<div id="loading-label" class="loading-label">Loading...</div>
+	</div>
 	<div id="lobby"></div>
 	<div id="race-hud"></div>
 	<a id="editor-link" href="editor.html">Create your own track</a>
